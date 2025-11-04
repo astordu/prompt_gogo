@@ -5,16 +5,40 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "dist": "electron-builder --mac dmg",
+    "build": "electron-builder"
   },
-  "keywords": ["electron", "ai", "text-processing", "deepseek"],
+  "keywords": [
+    "electron",
+    "ai",
+    "text-processing",
+    "deepseek"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "electron-store": "^8.1.0",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "electron-store": "^8.1.0"
   },
   "devDependencies": {
-    "electron": "^28.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.promptgogo.app",
+    "productName": "Prompt Go",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg"],
+      "icon": "build/icon.png"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    }
   }
 }

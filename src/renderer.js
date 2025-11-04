@@ -25,6 +25,10 @@ const keyboardShortcutInput = document.getElementById('keyboard-shortcut');
 const promptTemplateInput = document.getElementById('prompt-template');
 const templateError = document.getElementById('template-error');
 
+const macPermissionToggle = document.getElementById('mac-permission-toggle');
+const macPermissionContent = document.getElementById('mac-permission-content');
+const macPermissionIcon = document.getElementById('mac-permission-icon');
+
 // Initialize
 async function init() {
   const config = await window.electronAPI.getConfig();
@@ -39,6 +43,19 @@ async function init() {
   shortcuts = config.shortcuts || [];
   renderShortcuts();
 }
+
+// Mac Permission Guide Toggle
+macPermissionToggle.addEventListener('click', () => {
+  const isHidden = macPermissionContent.classList.contains('hidden');
+  
+  if (isHidden) {
+    macPermissionContent.classList.remove('hidden');
+    macPermissionIcon.style.transform = 'rotate(180deg)';
+  } else {
+    macPermissionContent.classList.add('hidden');
+    macPermissionIcon.style.transform = 'rotate(0deg)';
+  }
+});
 
 // API Key Management
 toggleVisibilityBtn.addEventListener('click', () => {

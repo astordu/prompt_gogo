@@ -10,21 +10,15 @@ const store = new Store({
     shortcuts: [
       {
         id: '1',
-        name: '总结文本',
-        shortcut: 'Command+Shift+1',
-        template: '请用三个关键点总结以下内容：\n\n{{select_content}}'
+        name: '整理文本内容',
+        shortcut: 'Command+Shift+0',
+        template: '将以下内容整理成语句通顺，有条理的内容，可以改变语言表达方式，增加适当的标点符号：\n\n{{select_content}}\n\n注意：\n1.输出纯文本文本格式，不要使用markdown格式\n2.不要有回车，要是一段文本\n3.不要输出解释内容，直接输出整理后的内容。'
       },
       {
         id: '2',
-        name: '翻译为英文',
-        shortcut: 'Command+Shift+2',
-        template: '请将以下文本翻译为英文：\n\n{{select_content}}'
-      },
-      {
-        id: '3',
-        name: '解释代码',
-        shortcut: 'Command+Shift+3',
-        template: '请详细解释以下代码的功能和实现：\n\n{{select_content}}'
+        name: '翻译成英文',
+        shortcut: 'Command+Shift+9',
+        template: '你是一个专业的翻译助手。请将以下文本翻译成英文，保持原文的语气：\n\n{{select_content}}\n\n注意：\n1.输出纯文本文本格式，不要使用markdown格式\n2.不要有回车，要是一段文本\n3.不要输出解释内容，直接输出翻译后的内容。'
       }
     ]
   }
