@@ -144,7 +144,17 @@ function renderShortcuts() {
 function formatShortcut(shortcut) {
   const parts = shortcut.split('+');
   return parts.map(part => {
-    const displayName = part === 'CommandOrControl' ? 'Cmd' : part;
+    let displayName = part;
+    // 映射到 Mac 友好的显示名称
+    if (part === 'CommandOrControl' || part === 'Command') {
+      displayName = '⌘';
+    } else if (part === 'Control') {
+      displayName = '⌃';
+    } else if (part === 'Alt' || part === 'Option') {
+      displayName = '⌥';
+    } else if (part === 'Shift') {
+      displayName = '⇧';
+    }
     return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md">${displayName}</kbd>`;
   }).join(' + ');
 }
@@ -270,16 +280,47 @@ keyboardShortcutInput.addEventListener('keydown', (e) => {
 
   const parts = [];
 
-  if (e.ctrlKey || e.metaKey) parts.push('CommandOrControl');
+  // 在 Mac 上区分 Command 和 Control 键
+  // metaKey = Command (⌘), ctrlKey = Control (^)
+  if (e.metaKey) {
+    parts.push('Command');
+  } else if (e.ctrlKey) {
+    parts.push('Control');
+  }
+
   if (e.shiftKey) parts.push('Shift');
   if (e.altKey) parts.push('Alt');
 
-  const key = e.key.toUpperCase();
-  if (key !== 'CONTROL' && key !== 'META' && key !== 'SHIFT' && key !== 'ALT') {
+  // 使用 e.code 而不是 e.key 来获取物理按键
+  // 这样 Shift+1 会返回 "Digit1" 而不是 "!"
+  let keyCode = e.code;
+
+  // 处理数字键：Digit0-9 -> 0-9
+  if (keyCode.startsWith('Digit')) {
+    const key = keyCode.replace('Digit', '');
+    parts.push(key);
+  }
+  // 处理字母键：KeyA-Z -> A-Z
+  else if (keyCode.startsWith('Key')) {
+    const key = keyCode.replace('Key', '');
+    parts.push(key);
+  }
+  // 处理 F1-F12 等功能键
+  else if (keyCode.startsWith('F') && keyCode.length <= 3) {
+    parts.push(keyCode);
+  }
+  // 忽略修饰键本身
+  else if (keyCode !== 'ControlLeft' && keyCode !== 'ControlRight' &&
+           keyCode !== 'MetaLeft' && keyCode !== 'MetaRight' &&
+           keyCode !== 'ShiftLeft' && keyCode !== 'ShiftRight' &&
+           keyCode !== 'AltLeft' && keyCode !== 'AltRight') {
+    // 其他特殊键使用 e.key
+    const key = e.key.toUpperCase();
     parts.push(key);
   }
 
-  if (parts.length > 0 && parts[parts.length - 1] !== 'COMMANDORCONTROL' && parts[parts.length - 1] !== 'SHIFT' && parts[parts.length - 1] !== 'ALT') {
+  // 确保至少有修饰键+实际按键
+  if (parts.length >= 2) {
     keyboardShortcutInput.value = parts.join('+');
   }
 });
