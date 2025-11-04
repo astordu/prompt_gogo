@@ -42,7 +42,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
     },
-    title: 'Prompt Go - Settings'
+    title: 'Prompt Go - 设置'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'settings.html'));
@@ -53,13 +53,13 @@ function createWindow() {
 }
 
 function createTray() {
-  // Create tray icon (you'll need to add an icon file)
+  // 创建托盘图标（需要添加图标文件）
   const iconPath = path.join(__dirname, 'assets', 'icon.png');
   tray = new Tray(iconPath);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Settings', click: () => { showWindow(); } },
-    { label: 'Quit', click: () => { app.quit(); } }
+    { label: '设置', click: () => { showWindow(); } },
+    { label: '退出', click: () => { app.quit(); } }
   ]);
 
   tray.setToolTip('Prompt Go');
@@ -167,7 +167,7 @@ async function handleShortcutTrigger(shortcutConfig) {
   // Check if running on macOS
   if (process.platform !== 'darwin') {
     console.error('❌ 错误: 不是 macOS 系统');
-    showNotification('Platform Error', 'This feature is only supported on macOS');
+    showNotification('平台错误', '此功能仅支持 macOS 系统');
     return;
   }
 

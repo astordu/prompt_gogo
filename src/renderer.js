@@ -32,7 +32,7 @@ async function init() {
   // Load API key
   if (config.apiKey) {
     apiKeyInput.value = config.apiKey;
-    showApiStatus(true, 'Valid');
+    showApiStatus(true, '有效');
   }
 
   // Load shortcuts
@@ -56,12 +56,12 @@ saveApiKeyBtn.addEventListener('click', async () => {
   const apiKey = apiKeyInput.value.trim();
 
   if (!apiKey) {
-    showApiStatus(false, 'Empty');
+    showApiStatus(false, '为空');
     return;
   }
 
   // Show loading
-  saveApiKeyBtn.textContent = 'Validating...';
+  saveApiKeyBtn.textContent = '验证中...';
   saveApiKeyBtn.disabled = true;
 
   // Validate API key
@@ -69,12 +69,12 @@ saveApiKeyBtn.addEventListener('click', async () => {
 
   if (validation.valid) {
     await window.electronAPI.saveApiKey(apiKey);
-    showApiStatus(true, 'Valid');
-    saveApiKeyBtn.textContent = 'Save Key';
+    showApiStatus(true, '有效');
+    saveApiKeyBtn.textContent = '保存密钥';
     saveApiKeyBtn.disabled = false;
   } else {
-    showApiStatus(false, 'Invalid');
-    saveApiKeyBtn.textContent = 'Save Key';
+    showApiStatus(false, '无效');
+    saveApiKeyBtn.textContent = '保存密钥';
     saveApiKeyBtn.disabled = false;
   }
 });
@@ -158,7 +158,7 @@ function escapeHtml(text) {
 // Modal Management
 addShortcutBtn.addEventListener('click', () => {
   currentEditingId = null;
-  modalTitle.textContent = 'Add New Shortcut';
+  modalTitle.textContent = '添加新快捷键';
   promptNameInput.value = '';
   keyboardShortcutInput.value = '';
   promptTemplateInput.value = '';
@@ -171,7 +171,7 @@ function editShortcut(id) {
   if (!shortcut) return;
 
   currentEditingId = id;
-  modalTitle.textContent = 'Edit Prompt Template';
+  modalTitle.textContent = '编辑提示模板';
   promptNameInput.value = shortcut.name;
   keyboardShortcutInput.value = shortcut.shortcut;
   promptTemplateInput.value = shortcut.template;
@@ -180,7 +180,7 @@ function editShortcut(id) {
 }
 
 async function deleteShortcut(id) {
-  if (!confirm('Are you sure you want to delete this shortcut?')) {
+  if (!confirm('确定要删除此快捷键吗？')) {
     return;
   }
 
@@ -216,7 +216,7 @@ savePromptBtn.addEventListener('click', async () => {
 
   // Validation
   if (!name || !shortcut || !template) {
-    alert('Please fill in all fields');
+    alert('请填写所有字段');
     return;
   }
 
@@ -255,12 +255,12 @@ savePromptBtn.addEventListener('click', async () => {
 let recordingShortcut = false;
 keyboardShortcutInput.addEventListener('focus', () => {
   recordingShortcut = true;
-  keyboardShortcutInput.placeholder = 'Press keys...';
+  keyboardShortcutInput.placeholder = '按下按键...';
 });
 
 keyboardShortcutInput.addEventListener('blur', () => {
   recordingShortcut = false;
-  keyboardShortcutInput.placeholder = 'Press key combination...';
+  keyboardShortcutInput.placeholder = '按下快捷键组合...';
 });
 
 keyboardShortcutInput.addEventListener('keydown', (e) => {
