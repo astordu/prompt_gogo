@@ -231,7 +231,6 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
     console.error('❌ API Key 未配置');
     showNotification('API Key 缺失', '请在设置中配置您的 DeepSeek API key');
     showWindow();
-    // Restore previous clipboard
     if (previousClipboard) {
       clipboard.writeText(previousClipboard);
       console.log('🔄 已恢复原剪贴板内容\n');
@@ -240,68 +239,125 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
   }
 
   console.log('✅ API Key 已配置');
-  console.log(`🚀 发送请求到 DeepSeek API...`);
+  console.log(`🚀 发送流式请求到 DeepSeek API...`);
   console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
+
+  const { execSync } = require('child_process');
 
   try {
     showNotification('处理中...', `正在运行: ${actionName}`);
 
     const startTime = Date.now();
+
+    // 使用流式响应
     const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
       model: 'deepseek-chat',
       messages: [
         { role: 'user', content: prompt }
       ],
-      stream: false,
+      stream: true,  // 开启流式输出
       temperature: 0.7
     }, {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
-      timeout: 30000 // 30 seconds timeout
+      responseType: 'stream',  // 接收流式数据
+      timeout: 60000 // 增加到 60 秒
     });
 
-    const elapsed = Date.now() - startTime;
-    console.log(`✅ API 响应成功 (耗时: ${elapsed}ms)`);
+    console.log('✅ 开始接收流式响应...');
+    console.log('⌨️ 开始流式输出到光标位置...');
 
-    if (!response.data || !response.data.choices || response.data.choices.length === 0) {
-      throw new Error('Invalid response from API');
-    }
+    let fullText = '';
+    let buffer = '';
 
-    const result = response.data.choices[0].message.content;
+    // 用于流式粘贴的函数（使用剪贴板+Cmd+V，支持中文）
+    const pasteText = (text) => {
+      if (!text) return;
 
-    if (!result || result.trim() === '') {
-      throw new Error('Empty response from API');
-    }
+      try {
+        // 写入剪贴板
+        clipboard.writeText(text);
 
-    console.log(`📄 结果长度: ${result.length} 字符`);
-    console.log(`📋 结果预览 (前100字符): "${result.substring(0, 100)}..."`);
+        // 模拟 Cmd+V 粘贴
+        execSync('osascript -e \'tell application "System Events" to keystroke "v" using command down\'');
+      } catch (error) {
+        console.error('⚠️ 粘贴失败:', error.message);
+      }
+    };
 
+    // 监听流式数据
+    response.data.on('data', (chunk) => {
+      const lines = chunk.toString().split('\n');
 
-    // Copy result to clipboard
-    clipboard.writeText(result);
-    console.log('✅ 结果已复制到剪贴板');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
 
-    // Auto-paste the result to cursor position
-    console.log('⌨️ 自动粘贴到光标位置...');
-    const { exec } = require('child_process');
+          if (data === '[DONE]') {
+            const elapsed = Date.now() - startTime;
+            console.log(`\n✅ 流式响应完成 (总耗时: ${elapsed}ms)`);
+            console.log(`📄 总共输出: ${fullText.length} 字符`);
 
-    // Wait a bit to ensure clipboard is updated, then paste
-    setTimeout(() => {
-      exec('osascript -e \'tell application "System Events" to keystroke "v" using command down\'', (pasteError) => {
-        if (pasteError) {
-          console.error('❌ 自动粘贴失败:', pasteError.message);
-          showNotification('成功', '结果已复制到剪贴板，请手动粘贴 (Cmd+V)');
-        } else {
-          console.log('✅ 已自动粘贴到光标位置');
-          showNotification('成功', '结果已自动粘贴!');
+            showNotification('成功', '内容已流式输出完成!');
+            console.log('\n========================================');
+            console.log('🎉 处理完成!');
+            console.log('========================================\n');
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content;
+
+            if (content) {
+              fullText += content;
+              buffer += content;
+
+              // 当缓冲区累积到一定长度时输出（批量粘贴更流畅）
+              if (buffer.length >= 10) {  // 增加到10个字符，减少粘贴次数
+                pasteText(buffer);
+                process.stdout.write(buffer); // 终端也显示
+                buffer = '';
+              }
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
         }
-        console.log('\n========================================');
-        console.log('🎉 处理完成!');
-        console.log('========================================\n');
-      });
-    }, 200); // Wait 200ms for clipboard to be ready
+      }
+    });
+
+    response.data.on('end', () => {
+      // 输出剩余缓冲区内容
+      if (buffer.length > 0) {
+        pasteText(buffer);
+        process.stdout.write(buffer);
+      }
+
+      const elapsed = Date.now() - startTime;
+      console.log(`\n\n✅ 流式响应结束 (总耗时: ${elapsed}ms)`);
+      console.log(`📄 总字符数: ${fullText.length}`);
+
+      // 恢复原剪贴板内容
+      if (previousClipboard) {
+        setTimeout(() => {
+          clipboard.writeText(previousClipboard);
+          console.log('🔄 已恢复原剪贴板内容');
+        }, 500);
+      }
+    });
+
+    response.data.on('error', (error) => {
+      console.error('❌ 流式响应错误:', error.message);
+      showNotification('错误', '流式输出中断');
+
+      if (previousClipboard) {
+        clipboard.writeText(previousClipboard);
+        console.log('🔄 已恢复原剪贴板内容\n');
+      }
+    });
 
   } catch (error) {
     console.error('\n========================================');
