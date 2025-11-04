@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>Prompt Go - Settings</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet"/>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#135bec",
+            "background-light": "#f6f6f8",
+            "background-dark": "#101622",
+            "card-light": "#ffffff",
+            "card-dark": "#161c28",
+            "input-light": "#ffffff",
+            "input-dark": "#1c1f27",
+            "border-light": "#e5e7eb",
+            "border-dark": "#3b4354",
+            "text-primary-light": "#111827",
+            "text-primary-dark": "#ffffff",
+            "text-secondary-light": "#6b7280",
+            "text-secondary-dark": "#9da6b9",
+            "success": "#28a745",
+            "danger": "#dc3545",
+          },
+          fontFamily: {
+            "display": ["Inter", "sans-serif"]
+          },
+          borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+        },
+      },
+    }
+  </script>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display">
+  <div class="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden">
+    <div class="layout-container flex h-full grow flex-col">
+      <div class="px-4 sm:px-8 md:px-16 lg:px-24 xl:px-40 flex flex-1 justify-center py-5 sm:py-10">
+        <div class="layout-content-container flex flex-col max-w-[960px] flex-1">
+          <div class="flex flex-wrap justify-between gap-3 p-4">
+            <div class="flex min-w-72 flex-col gap-3">
+              <h1 class="text-text-primary-light dark:text-text-primary-dark text-4xl font-black leading-tight tracking-[-0.033em]">Settings</h1>
+              <p class="text-text-secondary-light dark:text-text-secondary-dark text-base font-normal leading-normal">Configure your API key, manage shortcuts, and edit prompt templates.</p>
+            </div>
+          </div>
+
+          <!-- API Key Configuration Section -->
+          <div class="mt-8">
+            <div class="px-4 pb-3 pt-5">
+              <h2 class="text-text-primary-light dark:text-text-primary-dark text-[22px] font-bold leading-tight tracking-[-0.015em]">API Key Configuration</h2>
+            </div>
+            <div class="bg-card-light dark:bg-card-dark rounded-xl border border-border-light dark:border-border-dark p-6">
+              <div class="flex flex-col sm:flex-row flex-wrap items-start sm:items-end gap-4">
+                <label class="flex flex-col min-w-40 flex-1">
+                  <p class="text-text-primary-light dark:text-text-primary-dark text-base font-medium leading-normal pb-2">DeepSeek API Key</p>
+                  <div class="flex w-full flex-1 items-stretch rounded-lg">
+                    <div class="relative flex-grow">
+                      <input id="api-key-input" class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-text-primary-light dark:text-text-primary-dark focus:outline-0 focus:ring-0 border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary h-14 placeholder:text-text-secondary-light dark:placeholder:text-text-secondary-dark p-[15px] pr-12 text-base font-normal leading-normal" placeholder="Enter your API key here" type="password"/>
+                      <button id="toggle-visibility" class="absolute inset-y-0 right-0 flex items-center pr-4 text-text-secondary-light dark:text-text-secondary-dark">
+                        <span class="material-symbols-outlined">visibility_off</span>
+                      </button>
+                    </div>
+                  </div>
+                </label>
+                <div class="flex items-center gap-4 h-14 pb-1">
+                  <div id="api-status" class="flex items-center gap-2 hidden">
+                    <div id="status-indicator" class="h-2.5 w-2.5 rounded-full"></div>
+                    <p id="status-text" class="text-sm font-medium"></p>
+                  </div>
+                  <button id="save-api-key" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
+                    <span class="truncate">Save Key</span>
+                  </button>
+                </div>
+              </div>
+              <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm font-normal leading-normal pb-3 pt-3 px-1">
+                <a class="underline hover:text-primary" href="https://platform.deepseek.com/api_keys" target="_blank">Get your API key from DeepSeek.</a>
+              </p>
+            </div>
+          </div>
+
+          <!-- Shortcuts and Prompts Section -->
+          <div class="mt-12">
+            <div class="flex flex-wrap items-center justify-between gap-4 px-4 pb-3 pt-5">
+              <div>
+                <h2 class="text-text-primary-light dark:text-text-primary-dark text-[22px] font-bold leading-tight tracking-[-0.015em]">Shortcuts & Prompts</h2>
+                <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm font-normal leading-normal mt-1">Define keyboard shortcuts to trigger specific prompt templates.</p>
+              </div>
+              <button id="add-shortcut-btn" class="flex min-w-[84px] cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
+                <span class="material-symbols-outlined text-base">add</span>
+                <span class="truncate">Add New Shortcut</span>
+              </button>
+            </div>
+            <div class="bg-card-light dark:bg-card-dark rounded-xl border border-border-light dark:border-border-dark overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                  <thead class="border-b border-border-light dark:border-border-dark">
+                    <tr>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">Shortcut</th>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">Prompt Name</th>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark text-right" scope="col">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="shortcuts-table-body">
+                    <!-- Will be populated by JavaScript -->
+                  </tbody>
+                </table>
+                <div id="empty-state" class="text-center p-12 hidden">
+                  <p class="text-text-primary-light dark:text-text-primary-dark font-medium">No shortcuts yet</p>
+                  <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mt-1">Click "Add New Shortcut" to get started.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Add/Edit Prompt -->
+  <div id="prompt-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 hidden">
+    <div class="w-full max-w-2xl rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-2xl">
+      <div class="flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
+        <h3 id="modal-title" class="text-lg font-bold text-text-primary-light dark:text-text-primary-dark">Edit Prompt Template</h3>
+        <button id="close-modal" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="p-6 space-y-6">
+        <div>
+          <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="prompt-name">Prompt Name</label>
+          <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="prompt-name" placeholder="e.g., Translate to Spanish" type="text"/>
+        </div>
+        <div>
+          <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="keyboard-shortcut">Keyboard Shortcut</label>
+          <div class="relative">
+            <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="keyboard-shortcut" placeholder="Press key combination..." type="text"/>
+            <p class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-2">Press the keys you want to use for this shortcut (e.g., CommandOrControl+Shift+1).</p>
+          </div>
+        </div>
+        <div>
+          <label class="flex items-center gap-2 text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="prompt-template">
+            <span>Prompt Template</span>
+            <div class="relative group">
+              <span class="material-symbols-outlined text-base text-text-secondary-light dark:text-text-secondary-dark cursor-help">info</span>
+              <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 p-2 text-xs text-center text-white bg-gray-800 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                The {{select_content}} placeholder will be replaced with your currently selected text. It is required.
+              </div>
+            </div>
+          </label>
+          <textarea class="form-textarea w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark font-mono text-sm p-4" id="prompt-template" placeholder="Summarize the following text:&#10;&#10;{{select_content}}" rows="8"></textarea>
+          <p id="template-error" class="text-danger text-xs mt-2 hidden">Template must include {{select_content}} placeholder!</p>
+        </div>
+      </div>
+      <div class="flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-background-light dark:bg-background-dark/50 rounded-b-xl">
+        <button id="cancel-modal" class="min-w-[84px] cursor-pointer items-center justify-center rounded-lg h-10 px-4 bg-gray-200 dark:bg-gray-700 text-text-primary-light dark:text-text-primary-dark text-sm font-bold leading-normal tracking-[0.015em]">
+          <span class="truncate">Cancel</span>
+        </button>
+        <button id="save-prompt" class="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
+          <span class="truncate">Save Changes</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
