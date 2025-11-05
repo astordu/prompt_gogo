@@ -152,11 +152,6 @@ async function handleShortcutTrigger(shortcutConfig) {
   console.log(`🔥 快捷键触发: ${shortcutConfig.name}`);
   console.log(`   快捷键: ${shortcutConfig.shortcut}`);
   console.log('========================================');
-  // 移除立即显示的通知，避免焦点切换导致选中状态消失
-
-  // Step 1: Get selected text from clipboard
-  // First, we simulate Cmd+C to copy selected text
-  const { exec } = require('child_process');
 
   // Check if running on macOS
   if (process.platform !== 'darwin') {
@@ -165,65 +160,145 @@ async function handleShortcutTrigger(shortcutConfig) {
     return;
   }
 
-  // Save current clipboard content
+  const { execSync } = require('child_process');
+
+  // Save current clipboard content (in case we need fallback)
   const previousClipboard = clipboard.readText();
-  console.log('\n步骤 1: 保存当前剪贴板内容');
+  console.log('\n步骤 1: 保存当前剪贴板内容 (备用)');
   console.log(`📋 原剪贴板内容 (前50字符): "${previousClipboard.substring(0, 50)}"`);
 
-  // 不清空剪贴板，直接模拟 Cmd+C（更快，避免焦点问题）
-  console.log('\n步骤 2: 立即模拟 Cmd+C 复制选中文本');
-  console.log('⌨️ 执行 AppleScript 命令...');
+  let selectedText = '';
 
+  // 方法1: 尝试使用 Accessibility API 直接读取选中文本
+  console.log('\n步骤 2: 使用 Accessibility API 读取选中文本');
+  console.log('🔍 直接从应用获取选中内容 (不使用剪贴板)...');
+
+  try {
+    // 方法1: 创建临时 AppleScript 文件来避免引号问题
+    const fs = require('fs');
+    const os = require('os');
+    const scriptPath = path.join(os.tmpdir(), 'get-selected-text.scpt');
+
+    const appleScriptContent = `tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  tell frontApp
+    try
+      if exists (attribute "AXFocusedUIElement") then
+        set focusedElement to value of attribute "AXFocusedUIElement"
+        if exists (attribute "AXSelectedText" of focusedElement) then
+          return value of attribute "AXSelectedText" of focusedElement
+        else
+          return "ERROR:No AXSelectedText attribute"
+        end if
+      else
+        return "ERROR:No focused element"
+      end if
+    on error errMsg
+      return "ERROR:" & errMsg
+    end try
+  end tell
+end tell`;
+
+    // 写入临时文件
+    fs.writeFileSync(scriptPath, appleScriptContent, 'utf8');
+
+    // 执行 AppleScript 文件
+    const result = execSync(`osascript "${scriptPath}"`, {
+      encoding: 'utf8',
+      timeout: 2000
+    }).trim();
+
+    // 删除临时文件
+    try {
+      fs.unlinkSync(scriptPath);
+    } catch (e) {
+      // 忽略删除错误
+    }
+
+    console.log(`📝 Accessibility API 返回: "${result.substring(0, 100)}${result.length > 100 ? '...' : ''}"`);
+
+    // 检查是否成功获取
+    if (result && !result.startsWith('ERROR:') && result.trim() !== '') {
+      selectedText = result;
+      console.log(`✅ 成功通过 Accessibility API 获取文本 (${selectedText.length} 字符)`);
+      console.log('💡 这是最可靠的方法，不依赖剪贴板！');
+    } else {
+      console.log(`⚠️ Accessibility API 失败: ${result}`);
+      console.log('💡 原因可能是：');
+      console.log('   • 当前应用不支持 AXSelectedText 属性');
+      console.log('   • 没有选中任何文本');
+      console.log('   • 缺少辅助功能权限');
+      console.log('\n🔄 回退到剪贴板方法...');
+
+      // 方法2: 回退到剪贴板方法
+      selectedText = await fallbackToClipboard(previousClipboard);
+    }
+  } catch (error) {
+    console.error(`❌ Accessibility API 调用异常: ${error.message}`);
+    console.log('🔄 回退到剪贴板方法...');
+
+    // 方法2: 回退到剪贴板方法
+    selectedText = await fallbackToClipboard(previousClipboard);
+  }
+
+  // 检查最终结果
+  if (!selectedText || selectedText.trim() === '') {
+    console.log('\n❌ 所有方法均失败，未能获取选中文本');
+    console.log('💡 建议：');
+    console.log('   ① 确保文本已被选中（高亮显示）');
+    console.log('   ② 或者先 Cmd+C 复制，再按快捷键');
+    console.log('   ③ 检查是否授予了辅助功能权限');
+
+    clipboard.writeText(previousClipboard);
+    showNotification('未能获取文本', '请确保文本已选中\n或先 Cmd+C 复制后再试');
+    return;
+  }
+
+  console.log('\n步骤 3: 使用模板处理文本');
+  console.log(`📋 模板: ${shortcutConfig.template.substring(0, 50)}...`);
+  const prompt = shortcutConfig.template.replace('{{select_content}}', selectedText);
+
+  // Step 4: Call DeepSeek API
+  console.log('\n步骤 4: 调用 DeepSeek API');
+  try {
+    await processWithAI(prompt, shortcutConfig.name, previousClipboard);
+  } catch (error) {
+    console.error('\n❌ 处理失败:', error.message);
+    clipboard.writeText(previousClipboard);
+    console.log('🔄 已恢复原剪贴板内容\n');
+  }
+}
+
+// 回退方法：使用剪贴板方式获取文本
+async function fallbackToClipboard(previousClipboard) {
+  console.log('\n📋 使用剪贴板回退方案...');
   const { execSync } = require('child_process');
 
   try {
-    // 立即执行，不添加延迟，保持选中状态
+    // 模拟 Cmd+C
+    console.log('⌨️ 发送 Cmd+C 命令...');
     execSync('osascript -e \'tell application "System Events" to keystroke "c" using command down\'');
-    console.log('✅ Cmd+C 命令已发送');
 
-    // 增加等待时间，确保剪贴板更新完成
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // 等待剪贴板更新
+    console.log('⏱️ 等待 500ms...');
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     const selectedText = clipboard.readText();
-    console.log('\n步骤 3: 读取复制后的剪贴板内容');
-    console.log(`📝 剪贴板内容: "${selectedText}"`);
-    console.log(`📏 文本长度: ${selectedText.length} 字符`);
+    console.log(`📝 剪贴板内容: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`);
 
-    if (!selectedText || selectedText.trim() === '') {
-      console.log('\n⚠️ 剪贴板为空，未能捕获到选中文本');
-      console.log('💡 推荐使用【两步法】：');
-      console.log('   ① 先手动 Cmd+C 复制选中的文本');
-      console.log('   ② 然后按快捷键处理剪贴板中的文本');
-      console.log('   这样更稳定可靠！');
-
-      clipboard.writeText(previousClipboard);
-      showNotification('提示：请先复制文本', '① Cmd+C 复制文本\n② 按快捷键处理\n\n这样更稳定！');
-      return;
-    }
-
-    // 如果剪贴板内容与之前相同，说明用户可能已经预先复制了
-    if (selectedText === previousClipboard) {
-      console.log('\n💡 剪贴板内容未变化，将处理现有剪贴板内容');
+    if (selectedText && selectedText !== previousClipboard && selectedText.trim() !== '') {
+      console.log('✅ 剪贴板方法成功');
+      return selectedText;
+    } else if (selectedText && selectedText === previousClipboard && selectedText.trim() !== '') {
+      console.log('💡 使用现有剪贴板内容');
+      return selectedText;
     } else {
-      console.log('\n✅ 成功捕获新选中的文本');
-    }
-    console.log('\n步骤 4: 使用模板处理文本');
-    console.log(`📋 模板: ${shortcutConfig.template.substring(0, 50)}...`);
-    const prompt = shortcutConfig.template.replace('{{select_content}}', selectedText);
-
-    // Step 3: Call DeepSeek API
-    console.log('\n步骤 5: 调用 DeepSeek API');
-    try {
-      await processWithAI(prompt, shortcutConfig.name, previousClipboard);
-    } catch (error) {
-      console.error('\n❌ 处理失败:', error.message);
-      clipboard.writeText(previousClipboard);
-      console.log('🔄 已恢复原剪贴板内容\n');
+      console.log('⚠️ 剪贴板方法也失败了');
+      return '';
     }
   } catch (error) {
-    console.error('\n❌ 复制操作失败:', error.message);
-    showNotification('错误', `无法执行复制操作: ${error.message}`);
-    return;
+    console.error(`❌ 剪贴板方法异常: ${error.message}`);
+    return '';
   }
 }
 
