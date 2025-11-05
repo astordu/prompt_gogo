@@ -11,14 +11,14 @@ const store = new Store({
       {
         id: '1',
         name: '整理文本内容',
-        shortcut: 'Command+Shift+0',
+        shortcut: 'Control+Alt+9',
         template: '将以下内容整理成语句通顺，有条理的内容，可以改变语言表达方式，增加适当的标点符号：\n\n{{select_content}}\n\n注意：\n1.输出纯文本文本格式，不要使用markdown格式\n2.不要有回车，要是一段文本\n3.不要输出解释内容，直接输出整理后的内容。'
       },
       {
         id: '2',
         name: '翻译成英文',
-        shortcut: 'Command+Shift+9',
-        template: '你是一个专业的翻译助手。请将以下文本翻译成英文，保持原文的语气：\n\n{{select_content}}\n\n注意：\n1.输出纯文本文本格式，不要使用markdown格式\n2.不要有回车，要是一段文本\n3.不要输出解释内容，直接输出翻译后的内容。'
+        shortcut: 'Control+Alt+0',
+        template: '请将下面这段中文文本翻译成英文。只输出翻译结果，不要有任何解释、说明或额外内容：\n\n{{select_content}}\n\n要求：直接输出英文翻译，一段完整的句子，不要换行，不要markdown格式。'
       }
     ]
   }
@@ -168,35 +168,45 @@ async function handleShortcutTrigger(shortcutConfig) {
   // Save current clipboard content
   const previousClipboard = clipboard.readText();
   console.log('\n步骤 1: 保存当前剪贴板内容');
-  console.log(`📋 剪贴板内容 (前50字符): "${previousClipboard.substring(0, 50)}"`);
+  console.log(`📋 原剪贴板内容 (前50字符): "${previousClipboard.substring(0, 50)}"`);
 
-  // Immediately simulate Cmd+C (don't clear clipboard first, to maintain speed)
+  // 不清空剪贴板，直接模拟 Cmd+C（更快，避免焦点问题）
   console.log('\n步骤 2: 立即模拟 Cmd+C 复制选中文本');
-  console.log('⌨️ 执行 AppleScript 命令（同步）...');
+  console.log('⌨️ 执行 AppleScript 命令...');
 
   const { execSync } = require('child_process');
 
   try {
-    // Use sync execution for minimal delay
+    // 立即执行，不添加延迟，保持选中状态
     execSync('osascript -e \'tell application "System Events" to keystroke "c" using command down\'');
-    console.log('✅ Cmd+C 执行完成');
+    console.log('✅ Cmd+C 命令已发送');
 
-    // Wait very briefly for clipboard to update
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // 增加等待时间，确保剪贴板更新完成
+    await new Promise(resolve => setTimeout(resolve, 300));
 
     const selectedText = clipboard.readText();
     console.log('\n步骤 3: 读取复制后的剪贴板内容');
-    console.log(`📝 剪贴板内容 (前100字符): "${selectedText.substring(0, 100)}"`);
+    console.log(`📝 剪贴板内容: "${selectedText}"`);
+    console.log(`📏 文本长度: ${selectedText.length} 字符`);
 
     if (!selectedText || selectedText.trim() === '') {
-      console.log('\n⚠️ 剪贴板为空');
-      showNotification('提示', '未捕获到文本。\n\n方法1: 选中文本后立即按快捷键\n方法2: 先 Cmd+C 复制文本，再按快捷键');
+      console.log('\n⚠️ 剪贴板为空，未能捕获到选中文本');
+      console.log('💡 推荐使用【两步法】：');
+      console.log('   ① 先手动 Cmd+C 复制选中的文本');
+      console.log('   ② 然后按快捷键处理剪贴板中的文本');
+      console.log('   这样更稳定可靠！');
+
+      clipboard.writeText(previousClipboard);
+      showNotification('提示：请先复制文本', '① Cmd+C 复制文本\n② 按快捷键处理\n\n这样更稳定！');
       return;
     }
 
-    // Process even if clipboard unchanged (user may have copied text first)
-    console.log('\n✅ 已捕获文本');
-    console.log(`📏 文本长度: ${selectedText.length} 字符`);
+    // 如果剪贴板内容与之前相同，说明用户可能已经预先复制了
+    if (selectedText === previousClipboard) {
+      console.log('\n💡 剪贴板内容未变化，将处理现有剪贴板内容');
+    } else {
+      console.log('\n✅ 成功捕获新选中的文本');
+    }
     console.log('\n步骤 4: 使用模板处理文本');
     console.log(`📋 模板: ${shortcutConfig.template.substring(0, 50)}...`);
     const prompt = shortcutConfig.template.replace('{{select_content}}', selectedText);
@@ -265,19 +275,36 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
 
     let fullText = '';
     let buffer = '';
+    let pasteQueue = [];
+    let isPasting = false;
 
-    // 用于流式粘贴的函数（使用剪贴板+Cmd+V，支持中文）
-    const pasteText = (text) => {
+    // 用于流式粘贴的函数（使用剪贴板+Cmd+V，支持中文，带延迟队列）
+    const pasteText = async (text) => {
       if (!text) return;
 
-      try {
-        // 写入剪贴板
-        clipboard.writeText(text);
+      pasteQueue.push(text);
 
-        // 模拟 Cmd+V 粘贴
-        execSync('osascript -e \'tell application "System Events" to keystroke "v" using command down\'');
-      } catch (error) {
-        console.error('⚠️ 粘贴失败:', error.message);
+      if (!isPasting) {
+        isPasting = true;
+        while (pasteQueue.length > 0) {
+          const textToPaste = pasteQueue.shift();
+          try {
+            // 写入剪贴板
+            clipboard.writeText(textToPaste);
+
+            // 小延迟确保剪贴板已更新
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            // 模拟 Cmd+V 粘贴
+            execSync('osascript -e \'tell application "System Events" to keystroke "v" using command down\'');
+
+            // 粘贴后短暂延迟，避免覆盖太快
+            await new Promise(resolve => setTimeout(resolve, 30));
+          } catch (error) {
+            console.error('⚠️ 粘贴失败:', error.message);
+          }
+        }
+        isPasting = false;
       }
     };
 
@@ -309,8 +336,8 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
               fullText += content;
               buffer += content;
 
-              // 当缓冲区累积到一定长度时输出（批量粘贴更流畅）
-              if (buffer.length >= 10) {  // 增加到10个字符，减少粘贴次数
+              // 增大缓冲区，减少粘贴频率（30个字符一批）
+              if (buffer.length >= 30) {
                 pasteText(buffer);
                 process.stdout.write(buffer); // 终端也显示
                 buffer = '';
@@ -323,16 +350,22 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
       }
     });
 
-    response.data.on('end', () => {
+    response.data.on('end', async () => {
       // 输出剩余缓冲区内容
       if (buffer.length > 0) {
-        pasteText(buffer);
+        await pasteText(buffer);
         process.stdout.write(buffer);
+      }
+
+      // 等待所有粘贴完成
+      while (isPasting || pasteQueue.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       const elapsed = Date.now() - startTime;
       console.log(`\n\n✅ 流式响应结束 (总耗时: ${elapsed}ms)`);
       console.log(`📄 总字符数: ${fullText.length}`);
+      console.log(`📋 完整内容:\n${fullText}`);
 
       // 恢复原剪贴板内容
       if (previousClipboard) {
@@ -469,6 +502,28 @@ app.whenReady().then(() => {
   createWindow();
   // Uncomment when you have a tray icon
   // createTray();
+
+  // Check accessibility permissions on macOS
+  if (process.platform === 'darwin') {
+    const { systemPreferences } = require('electron');
+    const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
+
+    if (!hasAccessibility) {
+      console.warn('⚠️ 警告: 应用没有辅助功能权限');
+      console.log('💡 请前往: 系统偏好设置 > 安全性与隐私 > 隐私 > 辅助功能');
+      console.log('💡 将 Electron 或 Prompt Go 添加到允许列表中\n');
+
+      setTimeout(() => {
+        showNotification(
+          '需要辅助功能权限',
+          '请在系统偏好设置 > 隐私 > 辅助功能中授予权限，否则快捷键可能无法正常工作'
+        );
+      }, 2000);
+    } else {
+      console.log('✅ 辅助功能权限已授予\n');
+    }
+  }
+
   registerShortcuts();
 
   app.on('activate', () => {

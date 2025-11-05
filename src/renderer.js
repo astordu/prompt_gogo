@@ -297,16 +297,20 @@ keyboardShortcutInput.addEventListener('keydown', (e) => {
 
   const parts = [];
 
-  // 在 Mac 上区分 Command 和 Control 键
+  // 在 Mac 上支持所有修饰键的组合
   // metaKey = Command (⌘), ctrlKey = Control (^)
-  if (e.metaKey) {
-    parts.push('Command');
-  } else if (e.ctrlKey) {
+  if (e.ctrlKey) {
     parts.push('Control');
   }
-
-  if (e.shiftKey) parts.push('Shift');
-  if (e.altKey) parts.push('Alt');
+  if (e.metaKey) {
+    parts.push('Command');
+  }
+  if (e.shiftKey) {
+    parts.push('Shift');
+  }
+  if (e.altKey) {
+    parts.push('Alt');
+  }
 
   // 使用 e.code 而不是 e.key 来获取物理按键
   // 这样 Shift+1 会返回 "Digit1" 而不是 "!"

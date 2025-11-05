@@ -31,7 +31,8 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg"],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "identity": null
     },
     "files": [
       "src/**/*",
