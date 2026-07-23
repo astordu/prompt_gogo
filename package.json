@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "test": "node --test test/*.test.js",
     "dist": "electron-builder --mac dmg",
     "build": "electron-builder"
   },
