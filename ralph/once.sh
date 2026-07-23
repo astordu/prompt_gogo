@@ -15,7 +15,7 @@ all_issues=$(gh issue list --state open --json number,title,labels --limit 50 2>
 prompt=$(cat ralph/prompt.md)
 
 # 运行 agent
-qodercli --permission-mode bypassPermissions -p \
+qodercli  --model Qwen3.8-Max-Preview --permission-mode bypassPermissions -p \
   "最近的 commits: $commits
 
 可处理的 Issues (ready-for-agent): $issues
