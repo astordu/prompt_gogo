@@ -106,6 +106,35 @@ describe('pipeToCursor — sink lifecycle', () => {
   });
 });
 
+describe('pipeToCursor — time window flush', () => {
+  // Helper: async generator that yields items with a delay between each
+  async function* chunksWithDelay(arr, delayMs) {
+    for (const item of arr) {
+      yield item;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+
+  test('low-frequency chunks are flushed before char threshold', async () => {
+    const sink = createMemorySink();
+    // Each chunk is 5 chars — well below the 30-char threshold.
+    // With 250ms delay between chunks the 200ms timer fires first each time.
+    const inputs = ['aaaaa', 'bbbbb', 'ccccc'];
+    await pipeToCursor(chunksWithDelay(inputs, 250), sink);
+    // Every chunk should be flushed individually by the timer
+    assert.strictEqual(sink.writes.join(''), inputs.join(''));
+    assert.strictEqual(sink.writes.length, 3,
+      `expected 3 timer-triggered writes, got ${sink.writes.length}`);
+  });
+
+  test('time-window flush preserves completeness and order', async () => {
+    const sink = createMemorySink();
+    const inputs = Array.from({ length: 5 }, (_, i) => `item${i}`);
+    await pipeToCursor(chunksWithDelay(inputs, 250), sink);
+    assert.strictEqual(sink.writes.join(''), inputs.join(''));
+  });
+});
+
 describe('pipeToCursor — edge cases', () => {
   test('chunks that individually exceed threshold flush immediately', async () => {
     const sink = createMemorySink();
