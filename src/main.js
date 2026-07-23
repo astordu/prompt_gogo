@@ -2,6 +2,8 @@ const { app, BrowserWindow, globalShortcut, clipboard, ipcMain, Tray, Menu } = r
 const path = require('path');
 const Store = require('electron-store');
 const axios = require('axios');
+const { pipeToCursor } = require('./stream-output');
+const { createClipboardSink } = require('./clipboard-sink');
 
 // Initialize config store
 const store = new Store({
@@ -162,10 +164,7 @@ async function handleShortcutTrigger(shortcutConfig) {
 
   const { execSync } = require('child_process');
 
-  // Save current clipboard content (in case we need fallback)
-  const previousClipboard = clipboard.readText();
-  console.log('\n步骤 1: 保存当前剪贴板内容 (备用)');
-  console.log(`📋 原剪贴板内容 (前50字符): "${previousClipboard.substring(0, 50)}"`);
+  console.log('\n步骤 1: 准备读取选中文本');
 
   let selectedText = '';
 
@@ -231,14 +230,14 @@ end tell`;
       console.log('\n🔄 回退到剪贴板方法...');
 
       // 方法2: 回退到剪贴板方法
-      selectedText = await fallbackToClipboard(previousClipboard);
+      selectedText = await fallbackToClipboard();
     }
   } catch (error) {
     console.error(`❌ Accessibility API 调用异常: ${error.message}`);
     console.log('🔄 回退到剪贴板方法...');
 
     // 方法2: 回退到剪贴板方法
-    selectedText = await fallbackToClipboard(previousClipboard);
+    selectedText = await fallbackToClipboard();
   }
 
   // 检查最终结果
@@ -249,7 +248,6 @@ end tell`;
     console.log('   ② 或者先 Cmd+C 复制，再按快捷键');
     console.log('   ③ 检查是否授予了辅助功能权限');
 
-    clipboard.writeText(previousClipboard);
     showNotification('未能获取文本', '请确保文本已选中\n或先 Cmd+C 复制后再试');
     return;
   }
@@ -261,16 +259,14 @@ end tell`;
   // Step 4: Call DeepSeek API
   console.log('\n步骤 4: 调用 DeepSeek API');
   try {
-    await processWithAI(prompt, shortcutConfig.name, previousClipboard);
+    await processWithAI(prompt, shortcutConfig.name);
   } catch (error) {
     console.error('\n❌ 处理失败:', error.message);
-    clipboard.writeText(previousClipboard);
-    console.log('🔄 已恢复原剪贴板内容\n');
   }
 }
 
 // 回退方法：使用剪贴板方式获取文本
-async function fallbackToClipboard(previousClipboard) {
+async function fallbackToClipboard() {
   console.log('\n📋 使用剪贴板回退方案...');
   const { execSync } = require('child_process');
 
@@ -286,11 +282,8 @@ async function fallbackToClipboard(previousClipboard) {
     const selectedText = clipboard.readText();
     console.log(`📝 剪贴板内容: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`);
 
-    if (selectedText && selectedText !== previousClipboard && selectedText.trim() !== '') {
+    if (selectedText && selectedText.trim() !== '') {
       console.log('✅ 剪贴板方法成功');
-      return selectedText;
-    } else if (selectedText && selectedText === previousClipboard && selectedText.trim() !== '') {
-      console.log('💡 使用现有剪贴板内容');
       return selectedText;
     } else {
       console.log('⚠️ 剪贴板方法也失败了');
@@ -302,7 +295,7 @@ async function fallbackToClipboard(previousClipboard) {
   }
 }
 
-async function processWithAI(prompt, actionName, previousClipboard = '') {
+async function processWithAI(prompt, actionName) {
   const apiKey = store.get('apiKey');
   console.log('🔑 检查 API Key...');
 
@@ -310,18 +303,12 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
     console.error('❌ API Key 未配置');
     showNotification('API Key 缺失', '请在设置中配置您的 DeepSeek API key');
     showWindow();
-    if (previousClipboard) {
-      clipboard.writeText(previousClipboard);
-      console.log('🔄 已恢复原剪贴板内容\n');
-    }
     return;
   }
 
   console.log('✅ API Key 已配置');
   console.log(`🚀 发送流式请求到 DeepSeek API...`);
   console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
-
-  const { execSync } = require('child_process');
 
   try {
     showNotification('处理中...', `正在运行: ${actionName}`);
@@ -348,118 +335,61 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
     console.log('✅ 开始接收流式响应...');
     console.log('⌨️ 开始流式输出到光标位置...');
 
-    let fullText = '';
-    let buffer = '';
-    let pasteQueue = [];
-    let isPasting = false;
-
-    // 用于流式粘贴的函数（使用剪贴板+Cmd+V，支持中文，带延迟队列）
-    const pasteText = async (text) => {
-      if (!text) return;
-
-      pasteQueue.push(text);
-
-      if (!isPasting) {
-        isPasting = true;
-        while (pasteQueue.length > 0) {
-          const textToPaste = pasteQueue.shift();
-          try {
-            // 写入剪贴板
-            clipboard.writeText(textToPaste);
-
-            // 小延迟确保剪贴板已更新
-            await new Promise(resolve => setTimeout(resolve, 10));
-
-            // 模拟 Cmd+V 粘贴
-            execSync('osascript -e \'tell application "System Events" to keystroke "v" using command down\'');
-
-            // 粘贴后短暂延迟，避免覆盖太快
-            await new Promise(resolve => setTimeout(resolve, 30));
-          } catch (error) {
-            console.error('⚠️ 粘贴失败:', error.message);
-          }
-        }
-        isPasting = false;
-      }
-    };
-
-    // 监听流式数据
-    response.data.on('data', (chunk) => {
-      const lines = chunk.toString().split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
+    // TODO: 候选项④落地后删除
+    async function* sseTextStream(responseStream) {
+      let leftover = '';
+      for await (const chunk of responseStream) {
+        const lines = (leftover + chunk.toString()).split('\n');
+        leftover = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
           const data = line.slice(6).trim();
-
-          if (data === '[DONE]') {
-            const elapsed = Date.now() - startTime;
-            console.log(`\n✅ 流式响应完成 (总耗时: ${elapsed}ms)`);
-            console.log(`📄 总共输出: ${fullText.length} 字符`);
-
-            showNotification('成功', '内容已流式输出完成!');
-            console.log('\n========================================');
-            console.log('🎉 处理完成!');
-            console.log('========================================\n');
-            return;
-          }
-
+          if (data === '[DONE]') return;
           try {
             const parsed = JSON.parse(data);
             const content = parsed.choices?.[0]?.delta?.content;
-
-            if (content) {
-              fullText += content;
-              buffer += content;
-
-              // 增大缓冲区，减少粘贴频率（30个字符一批）
-              if (buffer.length >= 30) {
-                pasteText(buffer);
-                process.stdout.write(buffer); // 终端也显示
-                buffer = '';
-              }
-            }
+            if (content) yield content;
           } catch (e) {
             // 忽略解析错误
           }
         }
       }
-    });
-
-    response.data.on('end', async () => {
-      // 输出剩余缓冲区内容
-      if (buffer.length > 0) {
-        await pasteText(buffer);
-        process.stdout.write(buffer);
+      if (leftover) {
+        const line = leftover;
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          if (data !== '[DONE]') {
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) yield content;
+            } catch (e) {
+              // 忽略解析错误
+            }
+          }
+        }
       }
+    }
 
-      // 等待所有粘贴完成
-      while (isPasting || pasteQueue.length > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+    const collected = [];
+    async function* trackedChunks() {
+      for await (const chunk of sseTextStream(response.data)) {
+        collected.push(chunk);
+        yield chunk;
       }
+    }
 
-      const elapsed = Date.now() - startTime;
-      console.log(`\n\n✅ 流式响应结束 (总耗时: ${elapsed}ms)`);
-      console.log(`📄 总字符数: ${fullText.length}`);
-      console.log(`📋 完整内容:\n${fullText}`);
+    await pipeToCursor(trackedChunks(), createClipboardSink());
 
-      // 恢复原剪贴板内容
-      if (previousClipboard) {
-        setTimeout(() => {
-          clipboard.writeText(previousClipboard);
-          console.log('🔄 已恢复原剪贴板内容');
-        }, 500);
-      }
-    });
+    const fullText = collected.join('');
+    const elapsed = Date.now() - startTime;
+    console.log(`\n✅ 流式响应完成 (总耗时: ${elapsed}ms)`);
+    console.log(`📄 总共输出: ${fullText.length} 字符`);
 
-    response.data.on('error', (error) => {
-      console.error('❌ 流式响应错误:', error.message);
-      showNotification('错误', '流式输出中断');
-
-      if (previousClipboard) {
-        clipboard.writeText(previousClipboard);
-        console.log('🔄 已恢复原剪贴板内容\n');
-      }
-    });
+    showNotification('成功', '内容已流式输出完成!');
+    console.log('\n========================================');
+    console.log('🎉 处理完成!');
+    console.log('========================================\n');
 
   } catch (error) {
     console.error('\n========================================');
@@ -490,12 +420,6 @@ async function processWithAI(prompt, actionName, previousClipboard = '') {
 
     showNotification('错误', errorMessage);
     console.error('========================================\n');
-
-    // Restore previous clipboard on error
-    if (previousClipboard) {
-      clipboard.writeText(previousClipboard);
-      console.log('🔄 已恢复原剪贴板内容\n');
-    }
   }
 }
 
