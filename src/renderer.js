@@ -19,6 +19,8 @@ const promptNameInput = document.getElementById('prompt-name');
 const keyboardShortcutInput = document.getElementById('keyboard-shortcut');
 const promptTemplateInput = document.getElementById('prompt-template');
 const templateError = document.getElementById('template-error');
+const shortcutProviderSelect = document.getElementById('shortcut-provider');
+const shortcutProviderEmpty = document.getElementById('shortcut-provider-empty');
 
 const macPermissionToggle = document.getElementById('mac-permission-toggle');
 const macPermissionContent = document.getElementById('mac-permission-content');
@@ -637,10 +639,23 @@ saveProviderBtn.addEventListener('click', async () => {
   }
 
   renderProviders();
+  renderShortcuts();
   closeProviderModal();
 });
 
 // Shortcuts Management
+function getProviderLabel(providerId) {
+  const provider = providers.find(p => p.id === providerId);
+  if (!provider) return '未绑定';
+  return `${provider.name} (${TYPE_LABELS[provider.type] || provider.type})`;
+}
+
+function renderShortcutProviderOptions() {
+  shortcutProviderSelect.innerHTML = providers.map(p =>
+    `<option value="${p.id}">${escapeHtml(p.name)} (${escapeHtml(TYPE_LABELS[p.type] || p.type)})</option>`
+  ).join('');
+}
+
 function renderShortcuts() {
   if (shortcuts.length === 0) {
     emptyState.classList.remove('hidden');
@@ -656,6 +671,7 @@ function renderShortcuts() {
         ${formatShortcut(shortcut.shortcut)}
       </td>
       <td class="px-6 py-4 text-text-primary-light dark:text-text-primary-dark">${escapeHtml(shortcut.name)}</td>
+      <td class="px-6 py-4 text-text-secondary-light dark:text-text-secondary-dark text-sm">${escapeHtml(getProviderLabel(shortcut.providerId))}</td>
       <td class="px-6 py-4 text-right">
         <div class="flex justify-end gap-4">
           <button class="edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-primary" data-id="${shortcut.id}">
@@ -711,9 +727,17 @@ function escapeHtml(text) {
 
 // Modal Management
 addShortcutBtn.addEventListener('click', () => {
+  if (providers.length === 0) {
+    alert('请先添加至少一个 Provider，再创建快捷键。');
+    return;
+  }
+
   currentEditingId = null;
   modalTitle.textContent = '添加新快捷键';
   promptNameInput.value = '';
+  renderShortcutProviderOptions();
+  shortcutProviderSelect.value = providers[0].id;
+  shortcutProviderEmpty.classList.add('hidden');
   keyboardShortcutInput.value = '';
   setTemplateEditor('');
   templateError.classList.add('hidden');
@@ -727,6 +751,9 @@ function editShortcut(id) {
   currentEditingId = id;
   modalTitle.textContent = '编辑提示模板';
   promptNameInput.value = shortcut.name;
+  renderShortcutProviderOptions();
+  shortcutProviderSelect.value = shortcut.providerId || providers[0]?.id || '';
+  shortcutProviderEmpty.classList.add('hidden');
   keyboardShortcutInput.value = shortcut.shortcut;
   setTemplateEditor(shortcut.template);
   templateError.classList.add('hidden');
@@ -767,10 +794,16 @@ savePromptBtn.addEventListener('click', async () => {
   const name = promptNameInput.value.trim();
   const shortcut = keyboardShortcutInput.value.trim();
   const template = getTemplateText().trim();
+  const providerId = shortcutProviderSelect.value;
 
   // Validation
   if (!name || !shortcut || !template) {
     alert('请填写所有字段');
+    return;
+  }
+
+  if (!providerId) {
+    shortcutProviderEmpty.classList.remove('hidden');
     return;
   }
 
@@ -780,13 +813,15 @@ savePromptBtn.addEventListener('click', async () => {
   }
 
   templateError.classList.add('hidden');
+  shortcutProviderEmpty.classList.add('hidden');
 
   // Create or update shortcut
   const shortcutData = {
     id: currentEditingId || Date.now().toString(),
     name,
     shortcut,
-    template
+    template,
+    providerId
   };
 
   await window.electronAPI.saveShortcut(shortcutData);

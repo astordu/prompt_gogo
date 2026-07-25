@@ -267,6 +267,7 @@
                     <tr>
                       <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">快捷键</th>
                       <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">提示名称</th>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">Provider</th>
                       <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark text-right" scope="col">操作</th>
                     </tr>
                   </thead>
@@ -299,6 +300,13 @@
         <div>
           <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="prompt-name">提示名称</label>
           <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="prompt-name" placeholder="例如：翻译为西班牙语" type="text"/>
+        </div>
+        <div>
+          <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="shortcut-provider">Provider</label>
+          <select class="form-select w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="shortcut-provider">
+            <!-- Options populated by JavaScript -->
+          </select>
+          <p id="shortcut-provider-empty" class="text-danger text-xs mt-2 hidden">请先添加至少一个 Provider。</p>
         </div>
         <div>
           <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="keyboard-shortcut">快捷键</label>
