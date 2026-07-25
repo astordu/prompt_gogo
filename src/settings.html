@@ -37,6 +37,41 @@
       },
     }
   </script>
+  <style>
+    .template-chip {
+      display: inline-block;
+      background-color: rgba(19, 91, 236, 0.12);
+      color: #135bec;
+      border: 1px solid rgba(19, 91, 236, 0.3);
+      border-radius: 9999px;
+      padding: 1px 8px;
+      margin: 0 2px;
+      font-size: 0.8125rem;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      cursor: default;
+      user-select: none;
+      vertical-align: baseline;
+      line-height: 1.4;
+    }
+    .dark .template-chip {
+      background-color: rgba(19, 91, 236, 0.25);
+      color: #8db4ff;
+      border-color: rgba(19, 91, 236, 0.45);
+    }
+    #prompt-template {
+      line-height: 1.6;
+      cursor: text;
+    }
+    #prompt-template:empty::before {
+      content: attr(data-placeholder);
+      white-space: pre-wrap;
+      color: #6b7280;
+      pointer-events: none;
+    }
+    .dark #prompt-template:empty::before {
+      color: #9da6b9;
+    }
+  </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display">
   <div class="relative flex h-auto min-h-screen w-full flex-col group/design-root overflow-x-hidden">
@@ -252,12 +287,12 @@
             <div class="relative group">
               <span class="material-symbols-outlined text-base text-text-secondary-light dark:text-text-secondary-dark cursor-help">info</span>
               <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 p-2 text-xs text-center text-white bg-gray-800 rounded-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                {{select_content}} 占位符将被替换为您当前选中的文本。此项必填。
+                @select_content 变量将被替换为您当前选中的文本。此项必填。
               </div>
             </div>
           </label>
-          <textarea class="form-textarea w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark font-mono text-sm p-4" id="prompt-template" placeholder="总结以下文本：&#10;&#10;{{select_content}}" rows="8"></textarea>
-          <p id="template-error" class="text-danger text-xs mt-2 hidden">模板必须包含 {{select_content}} 占位符！</p>
+          <div id="prompt-template" contenteditable="true" data-placeholder="总结以下文本：&#10;&#10;@select_content" class="w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-text-primary-light dark:text-text-primary-dark font-mono text-sm p-4 min-h-[12rem] whitespace-pre-wrap break-words"></div>
+          <p id="template-error" class="text-danger text-xs mt-2 hidden">模板必须包含 @select_content 变量！</p>
         </div>
       </div>
       <div class="flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-background-light dark:bg-background-dark/50 rounded-b-xl">
@@ -271,6 +306,7 @@
     </div>
   </div>
 
+  <script src="template.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

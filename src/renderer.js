@@ -29,6 +29,66 @@ const macPermissionToggle = document.getElementById('mac-permission-toggle');
 const macPermissionContent = document.getElementById('mac-permission-content');
 const macPermissionIcon = document.getElementById('mac-permission-icon');
 
+// --- Template chip editor (contenteditable + atomic chips) ---
+
+function createChip(varName) {
+  const chip = document.createElement('span');
+  chip.contentEditable = false;
+  chip.className = 'template-chip';
+  chip.dataset.variable = varName;
+  chip.textContent = '@' + varName;
+  return chip;
+}
+
+function setTemplateEditor(text) {
+  promptTemplateInput.innerHTML = '';
+  const nodes = templateModule.parseTemplate(text);
+  for (const node of nodes) {
+    if (node.type === 'text') {
+      promptTemplateInput.appendChild(document.createTextNode(node.value));
+    } else {
+      promptTemplateInput.appendChild(createChip(node.value));
+    }
+  }
+}
+
+function domToNodes(element) {
+  const nodes = [];
+  for (const child of element.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      nodes.push({ type: 'text', value: child.textContent });
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      if (child.dataset && child.dataset.variable !== undefined) {
+        nodes.push({ type: 'variable', value: child.dataset.variable });
+      } else if (child.tagName === 'BR') {
+        nodes.push({ type: 'text', value: '\n' });
+      } else {
+        const isBlock = child.tagName === 'DIV' || child.tagName === 'P';
+        if (isBlock && nodes.length > 0) {
+          const last = nodes[nodes.length - 1];
+          if (!(last.type === 'text' && last.value.endsWith('\n'))) {
+            nodes.push({ type: 'text', value: '\n' });
+          }
+        }
+        nodes.push(...domToNodes(child));
+      }
+    }
+  }
+  return nodes;
+}
+
+function getTemplateText() {
+  const nodes = domToNodes(promptTemplateInput);
+  return templateModule.serializeTemplate(nodes);
+}
+
+promptTemplateInput.addEventListener('input', () => {
+  const hasChip = promptTemplateInput.querySelector('.template-chip');
+  if (!hasChip && !promptTemplateInput.textContent.trim()) {
+    promptTemplateInput.innerHTML = '';
+  }
+});
+
 // Initialize
 async function init() {
   const config = await window.electronAPI.getConfig();
@@ -188,7 +248,7 @@ addShortcutBtn.addEventListener('click', () => {
   modalTitle.textContent = '添加新快捷键';
   promptNameInput.value = '';
   keyboardShortcutInput.value = '';
-  promptTemplateInput.value = '';
+  setTemplateEditor('');
   templateError.classList.add('hidden');
   openModal();
 });
@@ -201,7 +261,7 @@ function editShortcut(id) {
   modalTitle.textContent = '编辑提示模板';
   promptNameInput.value = shortcut.name;
   keyboardShortcutInput.value = shortcut.shortcut;
-  promptTemplateInput.value = shortcut.template;
+  setTemplateEditor(shortcut.template);
   templateError.classList.add('hidden');
   openModal();
 }
@@ -239,7 +299,7 @@ promptModal.addEventListener('click', (e) => {
 savePromptBtn.addEventListener('click', async () => {
   const name = promptNameInput.value.trim();
   const shortcut = keyboardShortcutInput.value.trim();
-  const template = promptTemplateInput.value.trim();
+  const template = getTemplateText().trim();
 
   // Validation
   if (!name || !shortcut || !template) {
@@ -247,7 +307,7 @@ savePromptBtn.addEventListener('click', async () => {
     return;
   }
 
-  if (!template.includes('{{select_content}}')) {
+  if (!templateModule.validateTemplate(template)) {
     templateError.classList.remove('hidden');
     return;
   }
