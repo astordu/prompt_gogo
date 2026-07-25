@@ -96,12 +96,15 @@ function findProvider(providerId) {
 function migrateProviders() {
   const storeData = store.store;
 
-  // migrateToProviders is idempotent: it returns unchanged data if already migrated
+  const hasProviders = Array.isArray(storeData.providers);
+  const allShortcutsHaveIds = Array.isArray(storeData.shortcuts) &&
+    storeData.shortcuts.length > 0 &&
+    storeData.shortcuts.every(s => s.providerId);
+
+  if (hasProviders && allShortcutsHaveIds) return;
+
   const providerId = Date.now().toString();
   const result = migrateToProviders(storeData, providerId);
-
-  // Only persist if there was something to migrate (legacy apiKey present)
-  if (!('apiKey' in storeData)) return;
 
   store.set('providers', result.providers);
   store.set('shortcuts', result.shortcuts);
