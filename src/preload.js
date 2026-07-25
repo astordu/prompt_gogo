@@ -5,8 +5,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // Config
   getConfig: () => ipcRenderer.invoke('get-config'),
-  saveApiKey: (apiKey) => ipcRenderer.invoke('save-api-key', apiKey),
-  validateApiKey: (apiKey) => ipcRenderer.invoke('validate-api-key', apiKey),
 
   // Shortcuts
   getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),

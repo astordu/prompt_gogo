@@ -3,13 +3,6 @@ let currentEditingId = null;
 let shortcuts = [];
 
 // DOM elements
-const apiKeyInput = document.getElementById('api-key-input');
-const toggleVisibilityBtn = document.getElementById('toggle-visibility');
-const saveApiKeyBtn = document.getElementById('save-api-key');
-const apiStatus = document.getElementById('api-status');
-const statusIndicator = document.getElementById('status-indicator');
-const statusText = document.getElementById('status-text');
-
 const addShortcutBtn = document.getElementById('add-shortcut-btn');
 const shortcutsTableBody = document.getElementById('shortcuts-table-body');
 const emptyState = document.getElementById('empty-state');
@@ -389,12 +382,6 @@ promptTemplateInput.addEventListener('blur', () => {
 async function init() {
   const config = await window.electronAPI.getConfig();
 
-  // Load API key
-  if (config.apiKey) {
-    apiKeyInput.value = config.apiKey;
-    showApiStatus(true, '有效');
-  }
-
   // Load shortcuts
   shortcuts = config.shortcuts || [];
   renderShortcuts();
@@ -412,62 +399,6 @@ macPermissionToggle.addEventListener('click', () => {
     macPermissionIcon.style.transform = 'rotate(0deg)';
   }
 });
-
-// API Key Management
-toggleVisibilityBtn.addEventListener('click', () => {
-  const icon = toggleVisibilityBtn.querySelector('span');
-  if (apiKeyInput.type === 'password') {
-    apiKeyInput.type = 'text';
-    icon.textContent = 'visibility';
-  } else {
-    apiKeyInput.type = 'password';
-    icon.textContent = 'visibility_off';
-  }
-});
-
-saveApiKeyBtn.addEventListener('click', async () => {
-  const apiKey = apiKeyInput.value.trim();
-
-  if (!apiKey) {
-    showApiStatus(false, '为空');
-    return;
-  }
-
-  // Show loading
-  saveApiKeyBtn.textContent = '验证中...';
-  saveApiKeyBtn.disabled = true;
-
-  // Validate API key
-  const validation = await window.electronAPI.validateApiKey(apiKey);
-
-  if (validation.valid) {
-    await window.electronAPI.saveApiKey(apiKey);
-    showApiStatus(true, '有效');
-    saveApiKeyBtn.textContent = '保存密钥';
-    saveApiKeyBtn.disabled = false;
-  } else {
-    showApiStatus(false, '无效');
-    saveApiKeyBtn.textContent = '保存密钥';
-    saveApiKeyBtn.disabled = false;
-  }
-});
-
-function showApiStatus(isValid, text) {
-  apiStatus.classList.remove('hidden');
-  statusText.textContent = text;
-
-  if (isValid) {
-    statusIndicator.classList.remove('bg-danger');
-    statusIndicator.classList.add('bg-success');
-    statusText.classList.remove('text-danger');
-    statusText.classList.add('text-success');
-  } else {
-    statusIndicator.classList.remove('bg-success');
-    statusIndicator.classList.add('bg-danger');
-    statusText.classList.remove('text-success');
-    statusText.classList.add('text-danger');
-  }
-}
 
 // Shortcuts Management
 function renderShortcuts() {

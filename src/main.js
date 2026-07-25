@@ -5,11 +5,12 @@ const axios = require('axios');
 const { pipeToCursor } = require('./stream-output');
 const { createClipboardSink } = require('./clipboard-sink');
 const { replaceVariables } = require('./template');
+const { buildRequestConfig, validateProviderConfig, migrateToProviders } = require('./provider');
 
 // Initialize config store
 const store = new Store({
   defaults: {
-    apiKey: '',
+    providers: [],
     shortcuts: [
       {
         id: '1',
@@ -84,6 +85,29 @@ function migrateTemplates() {
     store.set('shortcuts', migrated);
     console.log('✅ 模板迁移完成：{{select_content}} → @select_content');
   }
+}
+
+function findProvider(providerId) {
+  if (!providerId) return null;
+  const providers = store.get('providers') || [];
+  return providers.find(p => p.id === providerId) || null;
+}
+
+function migrateProviders() {
+  const storeData = store.store;
+
+  // migrateToProviders is idempotent: it returns unchanged data if already migrated
+  const providerId = Date.now().toString();
+  const result = migrateToProviders(storeData, providerId);
+
+  // Only persist if there was something to migrate (legacy apiKey present)
+  if (!('apiKey' in storeData)) return;
+
+  store.set('providers', result.providers);
+  store.set('shortcuts', result.shortcuts);
+  store.delete('apiKey');
+
+  console.log('✅ Provider 迁移完成');
 }
 
 function registerShortcuts() {
@@ -270,10 +294,10 @@ end tell`;
   console.log(`📋 模板: ${shortcutConfig.template.substring(0, 50)}...`);
   const prompt = replaceVariables(shortcutConfig.template, { select_content: selectedText });
 
-  // Step 4: Call DeepSeek API
-  console.log('\n步骤 4: 调用 DeepSeek API');
+  // Step 4: Call AI via the bound Provider
+  console.log('\n步骤 4: 通过 Provider 调用 AI');
   try {
-    await processWithAI(prompt, shortcutConfig.name);
+    await processWithAI(prompt, shortcutConfig);
   } catch (error) {
     console.error('\n❌ 处理失败:', error.message);
   }
@@ -309,19 +333,29 @@ async function fallbackToClipboard() {
   }
 }
 
-async function processWithAI(prompt, actionName) {
-  const apiKey = store.get('apiKey');
-  console.log('🔑 检查 API Key...');
+async function processWithAI(prompt, shortcutConfig) {
+  const provider = findProvider(shortcutConfig.providerId);
+  const actionName = shortcutConfig.name;
 
-  if (!apiKey) {
-    console.error('❌ API Key 未配置');
-    showNotification('API Key 缺失', '请在设置中配置您的 DeepSeek API key');
+  if (!provider) {
+    console.error('❌ 未找到 Provider（请先在设置中配置模型提供方）');
+    showNotification('Provider 缺失', `快捷键「${actionName}」未绑定模型提供方，请在设置中配置`);
     showWindow();
     return;
   }
 
-  console.log('✅ API Key 已配置');
-  console.log(`🚀 发送流式请求到 DeepSeek API...`);
+  const validation = validateProviderConfig(provider);
+  if (!validation.valid) {
+    console.error('❌ Provider 配置不完整:', validation.errors.join(', '));
+    showNotification('Provider 配置不完整', validation.errors.join('\n'));
+    showWindow();
+    return;
+  }
+
+  const requestConfig = buildRequestConfig(provider);
+
+  console.log(`🔑 Provider: ${provider.name} (${provider.type})`);
+  console.log(`🚀 发送流式请求...`);
   console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
 
   try {
@@ -329,21 +363,17 @@ async function processWithAI(prompt, actionName) {
 
     const startTime = Date.now();
 
-    // 使用流式响应
-    const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
-      model: 'deepseek-chat',
+    const response = await axios.post(requestConfig.url, {
+      ...requestConfig.body,
       messages: [
         { role: 'user', content: prompt }
       ],
-      stream: true,  // 开启流式输出
+      stream: true,
       temperature: 0.7
     }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      responseType: 'stream',  // 接收流式数据
-      timeout: 60000 // 增加到 60 秒
+      headers: requestConfig.headers,
+      responseType: 'stream',
+      timeout: 60000
     });
 
     console.log('✅ 开始接收流式响应...');
@@ -422,7 +452,7 @@ async function processWithAI(prompt, actionName) {
         console.error('原因: 超过 API 调用频率限制');
       } else if (error.response.status >= 500) {
         errorMessage = 'API 服务暂时不可用，请稍后重试';
-        console.error('原因: DeepSeek 服务器错误');
+        console.error('原因: 服务器错误');
       }
     } else if (error.code === 'ECONNABORTED') {
       errorMessage = '请求超时，请检查网络连接';
@@ -451,35 +481,9 @@ function showNotification(title, body) {
 // IPC Handlers
 ipcMain.handle('get-config', () => {
   return {
-    apiKey: store.get('apiKey'),
+    providers: store.get('providers'),
     shortcuts: store.get('shortcuts')
   };
-});
-
-ipcMain.handle('save-api-key', (event, apiKey) => {
-  store.set('apiKey', apiKey);
-  return { success: true };
-});
-
-ipcMain.handle('validate-api-key', async (event, apiKey) => {
-  try {
-    const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
-      model: 'deepseek-chat',
-      messages: [
-        { role: 'user', content: 'Hello' }
-      ],
-      max_tokens: 10
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      }
-    });
-
-    return { valid: true };
-  } catch (error) {
-    return { valid: false, error: error.message };
-  }
 });
 
 ipcMain.handle('get-shortcuts', () => {
@@ -538,6 +542,7 @@ app.whenReady().then(() => {
   }
 
   migrateTemplates();
+  migrateProviders();
   registerShortcuts();
 
   app.on('activate', () => {
