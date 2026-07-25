@@ -21,5 +21,9 @@ _Avoid_: Tag, badge, mention
 _Avoid_: Dropdown, autocomplete, 下拉框
 
 **Shortcut（快捷键）**:
-一个全局键盘组合（如 Control+Alt+9），绑定一个 Template，在任意应用中可触发。
+一个全局键盘组合（如 Control+Alt+9），绑定一个 Template 和一个 Provider，在任意应用中可触发。
 _Avoid_: Hotkey, 热键, keybinding
+
+**Provider（模型提供方）**:
+一个可复用的 AI 服务连接配置，包含类型（DeepSeek / Ollama / Custom）、连接地址、凭证和模型名。多个 Shortcut 可共享同一个 Provider。
+_Avoid_: Service, 服务, backend, 后端, engine
