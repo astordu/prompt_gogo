@@ -87,6 +87,172 @@ promptTemplateInput.addEventListener('input', () => {
   if (!hasChip && !promptTemplateInput.textContent.trim()) {
     promptTemplateInput.innerHTML = '';
   }
+  handleCompletionInput();
+});
+
+// --- Completion Menu ---
+
+const completionMenu = document.getElementById('completion-menu');
+let menuVisible = false;
+let highlightedIndex = 0;
+let filteredVars = [];
+
+function getAtQueryFromCaret() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed) return null;
+
+  const node = range.startContainer;
+  if (node.nodeType !== Node.TEXT_NODE) return null;
+
+  const text = node.textContent.slice(0, range.startOffset);
+  const atIdx = text.lastIndexOf('@');
+  if (atIdx === -1) return null;
+
+  const query = text.slice(atIdx + 1);
+  // Only trigger if there's no space or newline in the query (since @ must be the last word start)
+  if (/[\s]/.test(query)) return null;
+
+  return { node, offset: atIdx, query };
+}
+
+function showCompletionMenu(anchorRect, query) {
+  const allVars = templateModule.VARIABLES;
+  filteredVars = allVars.filter(v => v.name.startsWith(query.toLowerCase()));
+
+  if (filteredVars.length === 0) {
+    hideCompletionMenu();
+    return;
+  }
+
+  highlightedIndex = 0;
+  renderMenuItems();
+
+  // Position below caret
+  const menuEl = completionMenu;
+  menuEl.classList.remove('hidden');
+  menuVisible = true;
+
+  // Place below the anchor rect, but keep within viewport
+  const viewportH = window.innerHeight;
+  const viewportW = window.innerWidth;
+  const menuH = menuEl.offsetHeight;
+  const menuW = menuEl.offsetWidth;
+
+  let top = anchorRect.bottom + 4;
+  let left = anchorRect.left;
+
+  if (top + menuH > viewportH) top = anchorRect.top - menuH - 4;
+  if (left + menuW > viewportW) left = viewportW - menuW - 8;
+
+  menuEl.style.top = top + 'px';
+  menuEl.style.left = left + 'px';
+}
+
+function hideCompletionMenu() {
+  completionMenu.classList.add('hidden');
+  menuVisible = false;
+  filteredVars = [];
+  highlightedIndex = 0;
+}
+
+function renderMenuItems() {
+  completionMenu.innerHTML = filteredVars.map((v, i) => {
+    const isHighlighted = i === highlightedIndex;
+    const bgClass = isHighlighted
+      ? 'bg-primary/10 dark:bg-primary/20'
+      : 'hover:bg-background-light dark:hover:bg-background-dark';
+    return `<div class="completion-item ${bgClass}" data-var="${v.name}" data-index="${i}">
+      <span class="completion-item-name text-primary">${v.name}</span>
+      <span class="completion-item-desc text-text-secondary-light dark:text-text-secondary-dark">${v.description}</span>
+    </div>`;
+  }).join('');
+
+  completionMenu.querySelectorAll('.completion-item').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // prevent editor blur
+      const varName = el.dataset.var;
+      confirmSelection(varName);
+    });
+  });
+}
+
+function confirmSelection(varName) {
+  const info = getAtQueryFromCaret();
+  if (!info) {
+    hideCompletionMenu();
+    return;
+  }
+
+  const { node, offset } = info;
+  // Delete from @ to caret
+  const range = document.createRange();
+  range.setStart(node, offset);
+  range.setEnd(node, window.getSelection().getRangeAt(0).startOffset);
+
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  range.deleteContents();
+
+  // Insert chip at cursor
+  const chip = createChip(varName);
+  range.insertNode(chip);
+
+  // Move caret after chip
+  const after = document.createRange();
+  after.setStartAfter(chip);
+  after.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(after);
+
+  hideCompletionMenu();
+}
+
+function handleCompletionInput() {
+  const info = getAtQueryFromCaret();
+  if (!info) {
+    hideCompletionMenu();
+    return;
+  }
+
+  // Get bounding rect of the @ character for menu positioning
+  const { node, offset } = info;
+  const range = document.createRange();
+  range.setStart(node, offset);
+  range.setEnd(node, offset + 1);
+  const rect = range.getBoundingClientRect();
+  // If @ isn't rendered (offset at text length), fall back to caret rect
+  const anchorRect = rect.width > 0 ? rect : window.getSelection().getRangeAt(0).getBoundingClientRect();
+
+  showCompletionMenu(anchorRect, info.query);
+}
+
+promptTemplateInput.addEventListener('keydown', (e) => {
+  if (!menuVisible) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    highlightedIndex = (highlightedIndex + 1) % filteredVars.length;
+    renderMenuItems();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    highlightedIndex = (highlightedIndex - 1 + filteredVars.length) % filteredVars.length;
+    renderMenuItems();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmSelection(filteredVars[highlightedIndex].name);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    hideCompletionMenu();
+  }
+});
+
+// Hide menu when editor loses focus (but not on mousedown inside menu — handled by e.preventDefault())
+promptTemplateInput.addEventListener('blur', () => {
+  // Small delay so mousedown on menu item fires first
+  setTimeout(hideCompletionMenu, 150);
 });
 
 // Initialize

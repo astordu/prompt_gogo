@@ -71,6 +71,31 @@
     .dark #prompt-template:empty::before {
       color: #9da6b9;
     }
+    #completion-menu {
+      position: fixed;
+      z-index: 9999;
+      min-width: 200px;
+      max-width: 280px;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+      overflow: hidden;
+    }
+    .completion-item {
+      display: flex;
+      flex-direction: column;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .completion-item-name {
+      font-size: 0.875rem;
+      font-weight: 500;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .completion-item-desc {
+      font-size: 0.75rem;
+      margin-top: 1px;
+    }
   </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display">
@@ -304,6 +329,11 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <!-- Completion Menu for @mention variable insertion -->
+  <div id="completion-menu" class="hidden bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark">
+    <!-- Items injected by renderer.js -->
   </div>
 
   <script src="template.js"></script>
