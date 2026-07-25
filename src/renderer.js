@@ -82,10 +82,140 @@ function getTemplateText() {
   return templateModule.serializeTemplate(nodes);
 }
 
+// --- Paste recognition ---
+
+function insertNodesAtCaret(nodes) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+
+  // Build a DocumentFragment from parsed nodes, inserting in reverse so we
+  // can reuse the same collapsed range insertion point each time.
+  const frag = document.createDocumentFragment();
+  for (const node of nodes) {
+    if (node.type === 'variable') {
+      frag.appendChild(createChip(node.value));
+    } else if (node.value) {
+      frag.appendChild(document.createTextNode(node.value));
+    }
+  }
+  const lastChild = frag.lastChild;
+  range.insertNode(frag);
+
+  // Move caret to end of inserted content
+  if (lastChild) {
+    const after = document.createRange();
+    after.setStartAfter(lastChild);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+  }
+}
+
+function handlePaste(e) {
+  e.preventDefault();
+  const text = e.clipboardData.getData('text/plain');
+  if (!text) return;
+  const nodes = templateModule.parseTemplate(text);
+  insertNodesAtCaret(nodes);
+}
+
+promptTemplateInput.addEventListener('paste', handlePaste);
+
+// --- Manual input recognition ---
+
+function convertTextNodesToChips() {
+  // Collect text nodes that contain at least one variable pattern
+  const sel = window.getSelection();
+  const caretNode = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).startContainer : null;
+  const caretOffset = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).startOffset : 0;
+
+  // Walk all text nodes inside the editor
+  const walker = document.createTreeWalker(
+    promptTemplateInput,
+    NodeFilter.SHOW_TEXT,
+    null
+  );
+
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    textNodes.push(node);
+  }
+
+  let newCaretNode = caretNode;
+  let newCaretOffset = caretOffset;
+
+  for (const textNode of textNodes) {
+    const parsed = templateModule.parseTemplate(textNode.textContent);
+    // Only replace if there is at least one variable node in the result
+    if (!parsed.some(n => n.type === 'variable')) continue;
+
+    const parent = textNode.parentNode;
+    if (!parent) continue;
+
+    // Determine caret offset relative to this text node before we replace it
+    const isCaretNode = textNode === caretNode;
+    let offsetBeforeCaret = isCaretNode ? caretOffset : 0;
+
+    // Build replacement nodes
+    const replacements = [];
+    let charCount = 0;
+    for (const part of parsed) {
+      if (part.type === 'variable') {
+        const chip = createChip(part.value);
+        replacements.push(chip);
+        const tokenLen = 1 + part.value.length; // '@' + name
+        if (isCaretNode && charCount + tokenLen <= offsetBeforeCaret) {
+          // Caret was inside or after this token — place it after the chip
+          newCaretNode = chip;
+          newCaretOffset = 1; // after the chip element
+        }
+        charCount += tokenLen;
+      } else {
+        const tn = document.createTextNode(part.value);
+        replacements.push(tn);
+        if (isCaretNode && charCount <= offsetBeforeCaret && charCount + part.value.length >= offsetBeforeCaret) {
+          newCaretNode = tn;
+          newCaretOffset = offsetBeforeCaret - charCount;
+        }
+        charCount += part.value.length;
+      }
+    }
+
+    // Insert replacements before the original text node, then remove it
+    for (const repl of replacements) {
+      parent.insertBefore(repl, textNode);
+    }
+    parent.removeChild(textNode);
+  }
+
+  // Restore caret
+  if (sel && newCaretNode && newCaretNode !== caretNode) {
+    try {
+      const newRange = document.createRange();
+      if (newCaretNode.nodeType === Node.ELEMENT_NODE) {
+        newRange.setStartAfter(newCaretNode);
+      } else {
+        newRange.setStart(newCaretNode, Math.min(newCaretOffset, newCaretNode.textContent.length));
+      }
+      newRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+    } catch (_) {
+      // Ignore caret restore failures — content is still correct
+    }
+  }
+}
+
 promptTemplateInput.addEventListener('input', () => {
   const hasChip = promptTemplateInput.querySelector('.template-chip');
   if (!hasChip && !promptTemplateInput.textContent.trim()) {
     promptTemplateInput.innerHTML = '';
+  }
+  if (!menuVisible) {
+    convertTextNodesToChips();
   }
   handleCompletionInput();
 });
