@@ -1,6 +1,8 @@
 // Global state
 let currentEditingId = null;
 let shortcuts = [];
+let providers = [];
+let currentEditingProviderId = null;
 
 // DOM elements
 const addShortcutBtn = document.getElementById('add-shortcut-btn');
@@ -382,6 +384,10 @@ promptTemplateInput.addEventListener('blur', () => {
 async function init() {
   const config = await window.electronAPI.getConfig();
 
+  // Load providers
+  providers = config.providers || [];
+  renderProviders();
+
   // Load shortcuts
   shortcuts = config.shortcuts || [];
   renderShortcuts();
@@ -398,6 +404,240 @@ macPermissionToggle.addEventListener('click', () => {
     macPermissionContent.classList.add('hidden');
     macPermissionIcon.style.transform = 'rotate(0deg)';
   }
+});
+
+// ─── Provider Management ───────────────────────────────────────────────────────
+
+const addProviderBtn = document.getElementById('add-provider-btn');
+const providersTableBody = document.getElementById('providers-table-body');
+const providersEmptyState = document.getElementById('providers-empty-state');
+const providerModal = document.getElementById('provider-modal');
+const providerModalTitle = document.getElementById('provider-modal-title');
+const closeProviderModalBtn = document.getElementById('close-provider-modal');
+const cancelProviderModalBtn = document.getElementById('cancel-provider-modal');
+const saveProviderBtn = document.getElementById('save-provider-btn');
+const providerNameInput = document.getElementById('provider-name');
+const providerTypeSelect = document.getElementById('provider-type');
+const providerApikeyField = document.getElementById('provider-apikey-field');
+const providerApikeyInput = document.getElementById('provider-apikey');
+const providerApikeyHint = document.getElementById('provider-apikey-hint');
+const providerBaseurlField = document.getElementById('provider-baseurl-field');
+const providerBaseurlInput = document.getElementById('provider-baseurl');
+const providerModelSelect = document.getElementById('provider-model-select');
+const providerModelInput = document.getElementById('provider-model-input');
+const verifyProviderBtn = document.getElementById('verify-provider-btn');
+const verifyProviderStatus = document.getElementById('verify-provider-status');
+
+const TYPE_LABELS = { deepseek: 'DeepSeek', ollama: 'Ollama', custom: 'Custom' };
+
+function renderProviders() {
+  if (providers.length === 0) {
+    providersEmptyState.classList.remove('hidden');
+    providersTableBody.innerHTML = '';
+    return;
+  }
+
+  providersEmptyState.classList.add('hidden');
+
+  providersTableBody.innerHTML = providers.map(p => `
+    <tr class="border-b border-border-light dark:border-border-dark last:border-b-0">
+      <td class="px-6 py-4 text-text-primary-light dark:text-text-primary-dark font-medium">${escapeHtml(p.name)}</td>
+      <td class="px-6 py-4">
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary dark:bg-primary/20">${escapeHtml(TYPE_LABELS[p.type] || p.type)}</span>
+      </td>
+      <td class="px-6 py-4 text-text-secondary-light dark:text-text-secondary-dark font-mono text-sm">${escapeHtml(p.model || '')}</td>
+      <td class="px-6 py-4 text-right">
+        <div class="flex justify-end gap-4">
+          <button class="provider-edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-primary" data-id="${p.id}">
+            <span class="material-symbols-outlined">edit</span>
+          </button>
+          <button class="provider-delete-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-danger dark:hover:text-danger" data-id="${p.id}">
+            <span class="material-symbols-outlined">delete</span>
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  document.querySelectorAll('.provider-edit-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      editProvider(e.currentTarget.getAttribute('data-id'));
+    });
+  });
+
+  document.querySelectorAll('.provider-delete-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      deleteProvider(e.currentTarget.getAttribute('data-id'));
+    });
+  });
+}
+
+function updateProviderFormFields(type) {
+  if (type === 'deepseek') {
+    providerApikeyField.classList.remove('hidden');
+    providerApikeyHint.classList.add('hidden');
+    providerBaseurlField.classList.add('hidden');
+    providerModelSelect.classList.remove('hidden');
+    providerModelInput.classList.add('hidden');
+    providerBaseurlInput.value = '';
+  } else if (type === 'ollama') {
+    providerApikeyField.classList.add('hidden');
+    providerBaseurlField.classList.remove('hidden');
+    providerBaseurlInput.placeholder = 'http://localhost:11434';
+    providerModelSelect.classList.add('hidden');
+    providerModelInput.classList.remove('hidden');
+    providerModelInput.placeholder = '例如：llama3.2';
+    providerApikeyInput.value = '';
+  } else {
+    // custom
+    providerApikeyField.classList.remove('hidden');
+    providerApikeyHint.classList.remove('hidden');
+    providerBaseurlField.classList.remove('hidden');
+    providerBaseurlInput.placeholder = 'https://api.example.com';
+    providerModelSelect.classList.add('hidden');
+    providerModelInput.classList.remove('hidden');
+    providerModelInput.placeholder = '例如：gpt-4o';
+  }
+}
+
+providerTypeSelect.addEventListener('change', () => {
+  updateProviderFormFields(providerTypeSelect.value);
+  verifyProviderStatus.classList.add('hidden');
+});
+
+function openProviderModal() {
+  verifyProviderStatus.classList.add('hidden');
+  providerModal.classList.remove('hidden');
+}
+
+function closeProviderModal() {
+  providerModal.classList.add('hidden');
+  currentEditingProviderId = null;
+}
+
+addProviderBtn.addEventListener('click', () => {
+  currentEditingProviderId = null;
+  providerModalTitle.textContent = '添加 Provider';
+  providerNameInput.value = '';
+  providerTypeSelect.value = 'deepseek';
+  providerApikeyInput.value = '';
+  providerBaseurlInput.value = '';
+  providerModelSelect.value = 'deepseek-v4-flash';
+  providerModelInput.value = '';
+  updateProviderFormFields('deepseek');
+  openProviderModal();
+});
+
+function editProvider(id) {
+  const provider = providers.find(p => p.id === id);
+  if (!provider) return;
+
+  currentEditingProviderId = id;
+  providerModalTitle.textContent = '编辑 Provider';
+  providerNameInput.value = provider.name;
+  providerTypeSelect.value = provider.type;
+  providerApikeyInput.value = provider.apiKey || '';
+  providerBaseurlInput.value = provider.baseUrl || '';
+  updateProviderFormFields(provider.type);
+
+  if (provider.type === 'deepseek') {
+    providerModelSelect.value = provider.model || 'deepseek-v4-flash';
+  } else {
+    providerModelInput.value = provider.model || '';
+  }
+
+  openProviderModal();
+}
+
+async function deleteProvider(id) {
+  const blocking = shortcuts.filter(s => s.providerId === id).map(s => s.name);
+  if (blocking.length > 0) {
+    alert(`无法删除：以下快捷键正在使用此 Provider：\n${blocking.join('、')}`);
+    return;
+  }
+  if (!confirm('确定要删除此 Provider 吗？')) return;
+
+  await window.electronAPI.deleteProvider(id);
+  providers = providers.filter(p => p.id !== id);
+  renderProviders();
+}
+
+closeProviderModalBtn.addEventListener('click', closeProviderModal);
+cancelProviderModalBtn.addEventListener('click', closeProviderModal);
+
+providerModal.addEventListener('click', (e) => {
+  if (e.target === providerModal) closeProviderModal();
+});
+
+verifyProviderBtn.addEventListener('click', async () => {
+  const type = providerTypeSelect.value;
+  const testProvider = {
+    type,
+    name: providerNameInput.value.trim() || 'test',
+    apiKey: providerApikeyInput.value.trim(),
+    baseUrl: providerBaseurlInput.value.trim(),
+    model: type === 'deepseek' ? providerModelSelect.value : providerModelInput.value.trim()
+  };
+
+  verifyProviderBtn.disabled = true;
+  verifyProviderStatus.className = 'text-sm text-text-secondary-light dark:text-text-secondary-dark';
+  verifyProviderStatus.textContent = '验证中...';
+  verifyProviderStatus.classList.remove('hidden');
+
+  const result = await window.electronAPI.validateProvider(testProvider);
+  verifyProviderBtn.disabled = false;
+
+  if (result.success) {
+    verifyProviderStatus.className = 'text-sm text-success';
+    verifyProviderStatus.textContent = '✓ 连接成功';
+    if (result.models && result.models.length > 0 && type === 'ollama') {
+      // Populate ollama model input with first model as hint
+      if (!providerModelInput.value) {
+        providerModelInput.placeholder = result.models[0];
+      }
+    }
+  } else {
+    verifyProviderStatus.className = 'text-sm text-danger';
+    verifyProviderStatus.textContent = `✗ ${result.error}`;
+  }
+});
+
+saveProviderBtn.addEventListener('click', async () => {
+  const name = providerNameInput.value.trim();
+  const type = providerTypeSelect.value;
+  const apiKey = providerApikeyInput.value.trim();
+  const baseUrl = providerBaseurlInput.value.trim();
+  const model = type === 'deepseek' ? providerModelSelect.value : providerModelInput.value.trim();
+
+  if (!name) { alert('请填写 Provider 名称'); return; }
+
+  const testProvider = { type, name, apiKey, baseUrl, model };
+  const validation = providerModule.validateProviderConfig(testProvider);
+  if (!validation.valid) {
+    alert(`配置不完整：\n${validation.errors.join('\n')}`);
+    return;
+  }
+
+  const providerData = {
+    id: currentEditingProviderId || Date.now().toString(),
+    name,
+    type,
+    apiKey: apiKey || undefined,
+    baseUrl: baseUrl || undefined,
+    model
+  };
+
+  await window.electronAPI.saveProvider(providerData);
+
+  if (currentEditingProviderId) {
+    const index = providers.findIndex(p => p.id === currentEditingProviderId);
+    if (index >= 0) providers[index] = providerData;
+  } else {
+    providers.push(providerData);
+  }
+
+  renderProviders();
+  closeProviderModal();
 });
 
 // Shortcuts Management

@@ -517,6 +517,64 @@ ipcMain.handle('delete-shortcut', (event, id) => {
   return { success: true };
 });
 
+ipcMain.handle('save-provider', (event, provider) => {
+  const providers = store.get('providers') || [];
+  const index = providers.findIndex(p => p.id === provider.id);
+  if (index >= 0) {
+    providers[index] = provider;
+  } else {
+    providers.push(provider);
+  }
+  store.set('providers', providers);
+  return { success: true };
+});
+
+ipcMain.handle('delete-provider', (event, id) => {
+  const shortcuts = store.get('shortcuts') || [];
+  const blocking = shortcuts.filter(s => s.providerId === id);
+  if (blocking.length > 0) {
+    return { success: false, blockingShortcuts: blocking.map(s => s.name) };
+  }
+  const providers = (store.get('providers') || []).filter(p => p.id !== id);
+  store.set('providers', providers);
+  return { success: true };
+});
+
+ipcMain.handle('validate-provider', async (event, provider) => {
+  const validation = validateProviderConfig(provider);
+  if (!validation.valid) {
+    return { success: false, error: validation.errors.join(', ') };
+  }
+
+  try {
+    if (provider.type === 'ollama') {
+      const base = (provider.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+      const response = await axios.get(`${base}/api/tags`, { timeout: 5000 });
+      return { success: true, models: (response.data.models || []).map(m => m.name) };
+    } else {
+      const requestConfig = buildRequestConfig(provider);
+      await axios.post(requestConfig.url, {
+        ...requestConfig.body,
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+        stream: false
+      }, {
+        headers: requestConfig.headers,
+        timeout: 10000
+      });
+      return { success: true };
+    }
+  } catch (error) {
+    const status = error.response?.status;
+    if (status === 401) return { success: false, error: 'API Key 无效' };
+    if (status === 404) return { success: false, error: '接口地址不存在，请检查 Base URL' };
+    if (error.code === 'ECONNREFUSED' || error.code === 'ECONNABORTED') {
+      return { success: false, error: '无法连接服务，请检查服务是否运行' };
+    }
+    return { success: true }; // 其他状态码（如 400/422）说明服务可达，Key 有效
+  }
+});
+
 // App lifecycle
 app.whenReady().then(() => {
   createWindow();

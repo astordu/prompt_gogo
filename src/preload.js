@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Shortcuts
   getShortcuts: () => ipcRenderer.invoke('get-shortcuts'),
   saveShortcut: (shortcut) => ipcRenderer.invoke('save-shortcut', shortcut),
-  deleteShortcut: (id) => ipcRenderer.invoke('delete-shortcut', id)
+  deleteShortcut: (id) => ipcRenderer.invoke('delete-shortcut', id),
+
+  // Providers
+  saveProvider: (provider) => ipcRenderer.invoke('save-provider', provider),
+  deleteProvider: (id) => ipcRenderer.invoke('delete-provider', id),
+  validateProvider: (provider) => ipcRenderer.invoke('validate-provider', provider)
 });

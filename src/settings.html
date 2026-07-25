@@ -213,6 +213,41 @@
             </div>
           </div>
 
+          <!-- Provider Management Section -->
+          <div class="mt-12">
+            <div class="flex flex-wrap items-center justify-between gap-4 px-4 pb-3 pt-5">
+              <div>
+                <h2 class="text-text-primary-light dark:text-text-primary-dark text-[22px] font-bold leading-tight tracking-[-0.015em]">模型提供方</h2>
+                <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm font-normal leading-normal mt-1">配置 AI 服务提供方（DeepSeek、Ollama、Custom）。</p>
+              </div>
+              <button id="add-provider-btn" class="flex min-w-[84px] cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
+                <span class="material-symbols-outlined text-base">add</span>
+                <span class="truncate">添加 Provider</span>
+              </button>
+            </div>
+            <div class="bg-card-light dark:bg-card-dark rounded-xl border border-border-light dark:border-border-dark overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                  <thead class="border-b border-border-light dark:border-border-dark">
+                    <tr>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">名称</th>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">类型</th>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark" scope="col">模型</th>
+                      <th class="px-6 py-4 text-sm font-semibold text-text-primary-light dark:text-text-primary-dark text-right" scope="col">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="providers-table-body">
+                    <!-- Will be populated by JavaScript -->
+                  </tbody>
+                </table>
+                <div id="providers-empty-state" class="text-center p-12 hidden">
+                  <p class="text-text-primary-light dark:text-text-primary-dark font-medium">暂无 Provider</p>
+                  <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mt-1">点击"添加 Provider"开始配置模型提供方。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Shortcuts and Prompts Section -->
           <div class="mt-12">
             <div class="flex flex-wrap items-center justify-between gap-4 px-4 pb-3 pt-5">
@@ -302,6 +337,65 @@
     <!-- Items injected by renderer.js -->
   </div>
 
+  <!-- Modal for Add/Edit Provider -->
+  <div id="provider-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 hidden">
+    <div class="w-full max-w-lg rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-2xl">
+      <div class="flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
+        <h3 id="provider-modal-title" class="text-lg font-bold text-text-primary-light dark:text-text-primary-dark">添加 Provider</h3>
+        <button id="close-provider-modal" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="p-6 space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-name">名称</label>
+          <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-name" placeholder="例如：我的 DeepSeek" type="text"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-type">类型</label>
+          <select class="form-select w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-type">
+            <option value="deepseek">DeepSeek</option>
+            <option value="ollama">Ollama</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div id="provider-apikey-field">
+          <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-apikey">API Key</label>
+          <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-apikey" placeholder="sk-..." type="password"/>
+          <p id="provider-apikey-hint" class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-1 hidden">API Key 可选</p>
+        </div>
+        <div id="provider-baseurl-field" class="hidden">
+          <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-baseurl">Base URL</label>
+          <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-baseurl" placeholder="http://localhost:11434" type="text"/>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-model">模型</label>
+          <select class="form-select w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4 hidden" id="provider-model-select">
+            <option value="deepseek-v4-flash">deepseek-v4-flash（默认）</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          </select>
+          <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-model-input" placeholder="例如：llama3.2" type="text"/>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="verify-provider-btn" class="flex items-center gap-2 rounded-lg h-9 px-4 border border-border-light dark:border-border-dark text-sm font-medium text-text-secondary-light dark:text-text-secondary-dark hover:border-primary hover:text-primary transition-colors">
+            <span class="material-symbols-outlined text-base">wifi_tethering</span>
+            验证连接
+          </button>
+          <span id="verify-provider-status" class="text-sm hidden"></span>
+        </div>
+      </div>
+      <div class="flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-background-light dark:bg-background-dark/50 rounded-b-xl">
+        <button id="cancel-provider-modal" class="min-w-[84px] cursor-pointer items-center justify-center rounded-lg h-10 px-4 bg-gray-200 dark:bg-gray-700 text-text-primary-light dark:text-text-primary-dark text-sm font-bold leading-normal tracking-[0.015em]">
+          取消
+        </button>
+        <button id="save-provider-btn" class="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-4 bg-primary text-white text-sm font-bold leading-normal tracking-[0.015em]">
+          保存
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="provider.js"></script>
   <script src="template.js"></script>
   <script src="renderer.js"></script>
 </body>
