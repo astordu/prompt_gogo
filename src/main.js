@@ -4,6 +4,7 @@ const Store = require('electron-store');
 const axios = require('axios');
 const { pipeToCursor } = require('./stream-output');
 const { createClipboardSink } = require('./clipboard-sink');
+const { replaceVariables } = require('./template');
 
 // Initialize config store
 const store = new Store({
@@ -14,13 +15,13 @@ const store = new Store({
         id: '1',
         name: '整理文本内容',
         shortcut: 'Control+Alt+9',
-        template: '将以下内容整理成语句通顺，有条理的内容，可以改变语言表达方式，增加适当的标点符号：\n\n{{select_content}}\n\n注意：\n1.输出纯文本文本格式，不要使用markdown格式\n2.不要有回车，要是一段文本\n3.不要输出解释内容，直接输出整理后的内容。'
+        template: '将以下内容整理成语句通顺，有条理的内容，可以改变语言表达方式，增加适当的标点符号：\n\n@select_content\n\n注意：\n1.输出纯文本文本格式，不要使用markdown格式\n2.不要有回车，要是一段文本\n3.不要输出解释内容，直接输出整理后的内容。'
       },
       {
         id: '2',
         name: '翻译成英文',
         shortcut: 'Control+Alt+0',
-        template: '请将下面这段中文文本翻译成英文。只输出翻译结果，不要有任何解释、说明或额外内容：\n\n{{select_content}}\n\n要求：直接输出英文翻译，一段完整的句子，不要换行，不要markdown格式。'
+        template: '请将下面这段中文文本翻译成英文。只输出翻译结果，不要有任何解释、说明或额外内容：\n\n@select_content\n\n要求：直接输出英文翻译，一段完整的句子，不要换行，不要markdown格式。'
       }
     ]
   }
@@ -69,6 +70,19 @@ function showWindow() {
   } else {
     mainWindow.show();
     mainWindow.focus();
+  }
+}
+
+function migrateTemplates() {
+  const shortcuts = store.get('shortcuts');
+  const migrated = shortcuts.map(s => ({
+    ...s,
+    template: s.template.replace(/\{\{select_content\}\}/g, '@select_content')
+  }));
+  const changed = migrated.some((s, i) => s.template !== shortcuts[i].template);
+  if (changed) {
+    store.set('shortcuts', migrated);
+    console.log('✅ 模板迁移完成：{{select_content}} → @select_content');
   }
 }
 
@@ -254,7 +268,7 @@ end tell`;
 
   console.log('\n步骤 3: 使用模板处理文本');
   console.log(`📋 模板: ${shortcutConfig.template.substring(0, 50)}...`);
-  const prompt = shortcutConfig.template.replace('{{select_content}}', selectedText);
+  const prompt = replaceVariables(shortcutConfig.template, { select_content: selectedText });
 
   // Step 4: Call DeepSeek API
   console.log('\n步骤 4: 调用 DeepSeek API');
@@ -523,6 +537,7 @@ app.whenReady().then(() => {
     }
   }
 
+  migrateTemplates();
   registerShortcuts();
 
   app.on('activate', () => {
