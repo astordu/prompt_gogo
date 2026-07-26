@@ -1016,7 +1016,29 @@ savePromptBtn.addEventListener('click', async () => {
     providerId
   };
 
-  await window.electronAPI.saveShortcut(shortcutData);
+  const saveResult = await window.electronAPI.saveShortcut(shortcutData);
+
+  if (!saveResult.success) {
+    // Save failed — preserve all form values and keep modal open
+    switch (saveResult.reason) {
+      case 'invalid':
+        showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
+        break;
+      case 'internal-conflict':
+        showAvailabilityStatus('internal-conflict', '✗ 与已有快捷键重复，请更换组合');
+        break;
+      case 'external-conflict':
+        showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用，请更换组合');
+        break;
+      case 'unavailable':
+        showAvailabilityStatus('unavailable', '暂时无法检测，请重试');
+        break;
+      case 'registration-failed':
+        showAvailabilityStatus('external-conflict', '✗ 注册失败，该组合可能已被占用');
+        break;
+    }
+    return;
+  }
 
   // Update local state
   if (currentEditingId) {

@@ -288,10 +288,10 @@ describe('triggering shortcuts', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: saveShortcut (upsert + re-register)
+// Tests: saveShortcut (atomic create)
 // ---------------------------------------------------------------------------
 
-describe('saveShortcut — create', () => {
+describe('saveShortcut — create (atomic)', () => {
   test('adds new shortcut to store and registers it', () => {
     const { service, registrar, store } = makeService({ shortcuts: [] });
     const sc = { id: '10', name: 'New', shortcut: 'CommandOrControl+Shift+N', template: 't' };
@@ -304,48 +304,187 @@ describe('saveShortcut — create', () => {
     assert.strictEqual(stored[0].id, '10');
     assert.ok(registrar._has('CommandOrControl+Shift+N'));
   });
+
+  test('write succeeds only after registration succeeds', () => {
+    const { service, registrar, store } = makeService({ shortcuts: [] });
+    registrar._reject('CommandOrControl+Shift+N');
+
+    const result = service.saveShortcut({ id: '10', name: 'New', shortcut: 'CommandOrControl+Shift+N', template: 't' });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'external-conflict');
+    // Config must not be written
+    assert.strictEqual(store.getShortcuts().length, 0);
+  });
+
+  test('create with invalid accelerator does not write config', () => {
+    const { service, store } = makeService({ shortcuts: [] });
+    const result = service.saveShortcut({ id: '10', name: 'Bad', shortcut: 'Control+9', template: 't' });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'invalid');
+    assert.strictEqual(store.getShortcuts().length, 0);
+  });
+
+  test('other shortcuts are never unregistered during create', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    service.saveShortcut({ id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' });
+
+    // Original shortcut must still be registered
+    assert.ok(registrar._has('Control+Alt+A'));
+    assert.ok(registrar._has('Control+Alt+B'));
+  });
 });
 
-describe('saveShortcut — update existing', () => {
-  test('updates shortcut by id and re-registers', () => {
+// ---------------------------------------------------------------------------
+// Tests: saveShortcut (atomic update)
+// ---------------------------------------------------------------------------
+
+describe('saveShortcut — update (atomic)', () => {
+  test('updates shortcut and atomically replaces accelerator', () => {
     const shortcuts = [
-      { id: '1', name: 'Old', shortcut: 'CommandOrControl+Shift+O', template: 'old' },
+      { id: '1', name: 'Old', shortcut: 'Control+Alt+O', template: 'old' },
     ];
     const { service, registrar, store } = makeService({ shortcuts });
-    const updated = { id: '1', name: 'New', shortcut: 'CommandOrControl+Shift+N', template: 'new' };
+    service.registerAllAtStartup();
+    const updated = { id: '1', name: 'New', shortcut: 'Control+Alt+N', template: 'new' };
 
     service.saveShortcut(updated);
 
     const stored = store.getShortcuts();
     assert.strictEqual(stored.length, 1);
     assert.strictEqual(stored[0].name, 'New');
-    assert.ok(!registrar._has('CommandOrControl+Shift+O'));
-    assert.ok(registrar._has('CommandOrControl+Shift+N'));
+    assert.ok(!registrar._has('Control+Alt+O'));
+    assert.ok(registrar._has('Control+Alt+N'));
   });
 
   test('other shortcuts remain registered after update', () => {
     const shortcuts = [
-      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
-      { id: '2', name: 'B', shortcut: 'CommandOrControl+Shift+B', template: 't2' },
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
     ];
     const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
 
-    service.saveShortcut({ id: '1', name: 'A2', shortcut: 'CommandOrControl+Shift+A2', template: 't1b' });
+    service.saveShortcut({ id: '1', name: 'A2', shortcut: 'Control+Alt+C', template: 't1b' });
 
-    // B should still be registered after the re-registration
-    assert.ok(registrar._has('CommandOrControl+Shift+B'));
+    // B should still be registered — never touched
+    assert.ok(registrar._has('Control+Alt+B'));
+    // Old A unregistered, new C registered
+    assert.ok(!registrar._has('Control+Alt+A'));
+    assert.ok(registrar._has('Control+Alt+C'));
+  });
+
+  test('edit conflict detected before save: old shortcut still registered', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
+    ];
+    const { service, registrar, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    // Try to edit #1 to use #2's accelerator
+    const result = service.saveShortcut({ id: '1', name: 'A-edited', shortcut: 'Control+Alt+B', template: 't1' });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'internal-conflict');
+    // Old config unchanged
+    const stored = store.getShortcuts();
+    assert.strictEqual(stored[0].name, 'A');
+    // Both originals still registered
+    assert.ok(registrar._has('Control+Alt+A'));
+    assert.ok(registrar._has('Control+Alt+B'));
+  });
+
+  test('edit registration fails: old accelerator stays registered, config unchanged', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+    ];
+    const { service, registrar, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    // Make the new accelerator fail to register after availability check passes.
+    // The availability check does a probe register+unregister. If the probe
+    // succeeds but the actual register fails, that's the race condition.
+    // We simulate this by rejecting only after the probe.
+    let probeDone = false;
+    const origRegister = registrar.register.bind(registrar);
+    registrar.register = function(accelerator, callback) {
+      if (accelerator === 'Control+Alt+C' && probeDone) {
+        return false;
+      }
+      return origRegister(accelerator, callback);
+    };
+    // Wrap checkAvailability so it sets probeDone after
+    const origCheck = service.checkAvailability.bind(service);
+    service.checkAvailability = function(...args) {
+      const result = origCheck(...args);
+      probeDone = true;
+      return result;
+    };
+
+    const result = service.saveShortcut({ id: '1', name: 'A-edited', shortcut: 'Control+Alt+C', template: 't1b' });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'registration-failed');
+    // Old config unchanged
+    assert.strictEqual(store.getShortcuts()[0].shortcut, 'Control+Alt+A');
+    // Old accelerator still registered
+    assert.ok(registrar._has('Control+Alt+A'));
+  });
+
+  test('save status changed to unavailable: old shortcut still registered', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+    ];
+    const { service, registrar, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    // Make the registrar throw on the new accelerator
+    registrar._throwOn('Control+Alt+C');
+
+    const result = service.saveShortcut({ id: '1', name: 'A-edited', shortcut: 'Control+Alt+C', template: 't1b' });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'unavailable');
+    // Old config unchanged
+    assert.strictEqual(store.getShortcuts()[0].shortcut, 'Control+Alt+A');
+    // Old accelerator still registered
+    assert.ok(registrar._has('Control+Alt+A'));
+  });
+
+  test('updating same accelerator (different name/template) keeps registration', () => {
+    const shortcuts = [
+      { id: '1', name: 'Old', shortcut: 'Control+Alt+A', template: 'old' },
+    ];
+    const { service, registrar, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    service.saveShortcut({ id: '1', name: 'New Name', shortcut: 'Control+Alt+A', template: 'new template' });
+
+    // Same accelerator still registered
+    assert.ok(registrar._has('Control+Alt+A'));
+    // Config updated
+    const stored = store.getShortcuts();
+    assert.strictEqual(stored[0].name, 'New Name');
+    assert.strictEqual(stored[0].template, 'new template');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Tests: deleteShortcut
+// Tests: deleteShortcut (atomic)
 // ---------------------------------------------------------------------------
 
-describe('deleteShortcut', () => {
-  test('removes shortcut from store and unregisters', () => {
+describe('deleteShortcut (atomic)', () => {
+  test('removes shortcut from store and unregisters only target', () => {
     const shortcuts = [
-      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
-      { id: '2', name: 'B', shortcut: 'CommandOrControl+Shift+B', template: 't2' },
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
     ];
     const { service, registrar, store } = makeService({ shortcuts });
     service.registerAllAtStartup();
@@ -355,15 +494,16 @@ describe('deleteShortcut', () => {
     const stored = store.getShortcuts();
     assert.strictEqual(stored.length, 1);
     assert.strictEqual(stored[0].id, '2');
-    assert.ok(!registrar._has('CommandOrControl+Shift+A'));
-    assert.ok(registrar._has('CommandOrControl+Shift+B'));
+    assert.ok(!registrar._has('Control+Alt+A'));
+    assert.ok(registrar._has('Control+Alt+B'));
   });
 
   test('deleting non-existent id is a no-op', () => {
     const shortcuts = [
-      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
     ];
     const { service, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
 
     service.deleteShortcut('nonexistent');
 
@@ -374,6 +514,116 @@ describe('deleteShortcut', () => {
     const { service } = makeService({ shortcuts: [] });
     const result = service.deleteShortcut('x');
     assert.deepStrictEqual(result, { success: true });
+  });
+
+  test('other shortcuts are never unregistered or re-registered', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
+      { id: '3', name: 'C', shortcut: 'Control+Alt+C', template: 't3' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    service.deleteShortcut('2');
+
+    // A and C untouched
+    assert.ok(registrar._has('Control+Alt+A'));
+    assert.ok(registrar._has('Control+Alt+C'));
+    // B gone
+    assert.ok(!registrar._has('Control+Alt+B'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: atomic behavior — unrelated shortcuts never touched
+// ---------------------------------------------------------------------------
+
+describe('atomic operations — no unregister-all strategy', () => {
+  test('saveShortcut does not call unregisterAll', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    let unregisterAllCalled = false;
+    const origUnregisterAll = registrar.unregisterAll;
+    registrar.unregisterAll = () => { unregisterAllCalled = true; };
+
+    service.saveShortcut({ id: '3', name: 'C', shortcut: 'Control+Alt+C', template: 't3' });
+
+    assert.ok(!unregisterAllCalled, 'unregisterAll must not be called during save');
+  });
+
+  test('deleteShortcut does not call unregisterAll', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    let unregisterAllCalled = false;
+    const origUnregisterAll = registrar.unregisterAll;
+    registrar.unregisterAll = () => { unregisterAllCalled = true; };
+
+    service.deleteShortcut('1');
+
+    assert.ok(!unregisterAllCalled, 'unregisterAll must not be called during delete');
+  });
+
+  test('saveShortcut with conflict does not touch any registration', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'Control+Alt+B', template: 't2' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    let unregisterCalled = false;
+    const origUnregister = registrar.unregister;
+    registrar.unregister = () => { unregisterCalled = true; };
+
+    // Save with conflicting accelerator
+    service.saveShortcut({ id: '3', name: 'C', shortcut: 'Control+Alt+A', template: 't3' });
+
+    assert.ok(!unregisterCalled, 'unregister must not be called on failed save');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: legacy single-modifier compatibility
+// ---------------------------------------------------------------------------
+
+describe('legacy single-modifier shortcut compatibility', () => {
+  test('single-modifier shortcut registered at startup still works', () => {
+    const shortcuts = [
+      { id: '1', name: 'Legacy', shortcut: 'Control+9', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+    // Should be registered since startup registration doesn't validate
+    assert.ok(registrar._has('Control+9'));
+  });
+
+  test('editing a legacy shortcut and saving must pass new validation rules', () => {
+    const shortcuts = [
+      { id: '1', name: 'Legacy', shortcut: 'Control+9', template: 't1' },
+    ];
+    const { service, registrar, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    // Try to save with a single-modifier shortcut
+    const result = service.saveShortcut({ id: '1', name: 'Legacy-edited', shortcut: 'Control+8', template: 't1b' });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'invalid');
+    // Old shortcut config unchanged
+    assert.strictEqual(store.getShortcuts()[0].shortcut, 'Control+9');
+    // Old shortcut still registered
+    assert.ok(registrar._has('Control+9'));
   });
 });
 

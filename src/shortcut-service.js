@@ -211,46 +211,118 @@ class ShortcutService {
   }
 
   // ------------------------------------------------------------------
-  // Save (create or update) — preserves existing behavior
+  // Save (atomic create or update)
   // ------------------------------------------------------------------
 
   /**
-   * Save a shortcut (upsert by id).
-   * Currently does a full re-registration to match existing behavior.
-   * Future issues (#22) will make this atomic.
+   * Atomically save a shortcut.
+   *
+   * Performs a fresh availability check first. If the check does not
+   * return 'available', nothing is written and the failure reason is
+   * returned so the UI can preserve the draft.
+   *
+   * On success, only the target shortcut is affected:
+   * - Editing: the old accelerator is unregistered, the new one is
+   *   registered, then config is persisted. If registration of the new
+   *   accelerator fails, the old accelerator is left registered and the
+   *   config is not changed.
+   * - Creating: the new accelerator is registered, then config is
+   *   persisted. If registration fails, nothing is written.
+   *
+   * Other shortcuts are never unregistered or re-registered.
+   *
    * @param {Object} shortcut
-   * @returns {{ success: true }}
+   * @returns {{ success: true } | { success: false, reason: 'invalid' | 'internal-conflict' | 'external-conflict' | 'unavailable' | 'registration-failed' }}
    */
   saveShortcut(shortcut) {
-    const shortcuts = this.store.getShortcuts();
-    const index = shortcuts.findIndex(s => s.id === shortcut.id);
-
-    if (index >= 0) {
-      shortcuts[index] = shortcut;
-    } else {
-      shortcuts.push(shortcut);
+    // 1. Fresh availability re-check (guard against status changes)
+    const check = this.checkAvailability(shortcut.shortcut, shortcut.id);
+    if (check.status !== 'available') {
+      return { success: false, reason: check.status };
     }
 
-    this.store.setShortcuts(shortcuts);
-    this.registerAllAtStartup();
+    // 2. Find existing shortcut (if editing)
+    const shortcuts = this.store.getShortcuts();
+    const existingIndex = shortcuts.findIndex(s => s.id === shortcut.id);
+    const existing = existingIndex >= 0 ? shortcuts[existingIndex] : null;
+
+    // 3. For an edit with a changed accelerator: try to register the new
+    //    one first. If it fails, the old one stays untouched.
+    if (existing && existing.shortcut !== shortcut.shortcut) {
+      const regResult = this._tryRegister(shortcut);
+      if (!regResult.ok) {
+        return { success: false, reason: 'registration-failed' };
+      }
+      // New one registered — now unregister the old one
+      this._unregisterOne(existing.shortcut);
+    } else if (existing && existing.shortcut === shortcut.shortcut) {
+      // Same accelerator, just update the config/callback in the
+      // registrar map by re-registering
+      this._unregisterOne(existing.shortcut);
+      const regResult = this._tryRegister(shortcut);
+      if (!regResult.ok) {
+        // Should not happen since we just unregistered it, but handle anyway
+        return { success: false, reason: 'registration-failed' };
+      }
+    } else {
+      // 4. New shortcut (create)
+      const regResult = this._tryRegister(shortcut);
+      if (!regResult.ok) {
+        return { success: false, reason: 'registration-failed' };
+      }
+    }
+
+    // 5. Persist to store
+    const next = shortcuts.slice();
+    if (existingIndex >= 0) {
+      next[existingIndex] = shortcut;
+    } else {
+      next.push(shortcut);
+    }
+    this.store.setShortcuts(next);
+
     return { success: true };
   }
 
+  /**
+   * Unregister a single accelerator from both the registrar and the
+   * internal map.
+   * @private
+   */
+  _unregisterOne(accelerator) {
+    if (this._registered.has(accelerator)) {
+      try {
+        this.registrar.unregister(accelerator);
+      } catch {
+        // Best effort — the accelerator may already be gone
+      }
+      this._registered.delete(accelerator);
+    }
+  }
+
   // ------------------------------------------------------------------
-  // Delete
+  // Delete (atomic)
   // ------------------------------------------------------------------
 
   /**
-   * Delete a shortcut by id.
-   * Currently does a full re-registration to match existing behavior.
-   * Future issues (#22) will make this atomic.
+   * Atomically delete a shortcut by id.
+   *
+   * Only the target shortcut is unregistered. Other shortcuts are never
+   * touched.
    * @param {string} id
    * @returns {{ success: true }}
    */
   deleteShortcut(id) {
-    const shortcuts = this.store.getShortcuts().filter(s => s.id !== id);
-    this.store.setShortcuts(shortcuts);
-    this.registerAllAtStartup();
+    const shortcuts = this.store.getShortcuts();
+    const target = shortcuts.find(s => s.id === id);
+
+    if (target) {
+      this._unregisterOne(target.shortcut);
+    }
+
+    const next = shortcuts.filter(s => s.id !== id);
+    this.store.setShortcuts(next);
+
     return { success: true };
   }
 
