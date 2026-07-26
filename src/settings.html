@@ -383,6 +383,8 @@
             <option value="deepseek-v4-pro">deepseek-v4-pro</option>
           </select>
           <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-model-input" placeholder="例如：llama3.2" type="text"/>
+          <select class="form-select w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4 hidden" id="provider-ollama-model-select"></select>
+          <p id="provider-ollama-model-status" class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-1 hidden"></p>
         </div>
         <div class="flex items-center gap-3">
           <button id="verify-provider-btn" class="flex items-center gap-2 rounded-lg h-9 px-4 border border-border-light dark:border-border-dark text-sm font-medium text-text-secondary-light dark:text-text-secondary-dark hover:border-primary hover:text-primary transition-colors">

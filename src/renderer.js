@@ -427,6 +427,8 @@ const providerBaseurlField = document.getElementById('provider-baseurl-field');
 const providerBaseurlInput = document.getElementById('provider-baseurl');
 const providerModelSelect = document.getElementById('provider-model-select');
 const providerModelInput = document.getElementById('provider-model-input');
+const providerOllamaModelSelect = document.getElementById('provider-ollama-model-select');
+const providerOllamaModelStatus = document.getElementById('provider-ollama-model-status');
 const verifyProviderBtn = document.getElementById('verify-provider-btn');
 const verifyProviderStatus = document.getElementById('verify-provider-status');
 
@@ -474,7 +476,45 @@ function renderProviders() {
   });
 }
 
-function updateProviderFormFields(type) {
+async function fetchOllamaModels(currentModel) {
+  const baseUrl = (providerBaseurlInput.value.trim() || 'http://localhost:11434').replace(/\/$/, '');
+  providerModelInput.classList.add('hidden');
+  providerOllamaModelSelect.classList.add('hidden');
+  providerOllamaModelStatus.classList.remove('hidden');
+  providerOllamaModelStatus.textContent = '正在获取模型列表...';
+
+  try {
+    const res = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const models = (data.models || []).map(m => m.name).filter(Boolean);
+    if (models.length === 0) throw new Error('未发现已安装模型');
+
+    providerOllamaModelSelect.innerHTML = models.map(m =>
+      `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`
+    ).join('');
+    if (currentModel && models.includes(currentModel)) {
+      providerOllamaModelSelect.value = currentModel;
+    }
+    providerOllamaModelSelect.classList.remove('hidden');
+    providerOllamaModelStatus.classList.add('hidden');
+  } catch {
+    providerModelInput.classList.remove('hidden');
+    providerModelInput.placeholder = '例如：llama3.2';
+    providerOllamaModelStatus.textContent = '无法连接 Ollama，可手动输入模型名';
+  }
+}
+
+function getOllamaModel() {
+  if (!providerOllamaModelSelect.classList.contains('hidden')) {
+    return providerOllamaModelSelect.value;
+  }
+  return providerModelInput.value.trim();
+}
+
+function updateProviderFormFields(type, currentModel) {
+  providerOllamaModelStatus.classList.add('hidden');
+  providerOllamaModelSelect.classList.add('hidden');
   if (type === 'deepseek') {
     providerApikeyField.classList.remove('hidden');
     providerApikeyHint.classList.add('hidden');
@@ -487,9 +527,9 @@ function updateProviderFormFields(type) {
     providerBaseurlField.classList.remove('hidden');
     providerBaseurlInput.placeholder = 'http://localhost:11434';
     providerModelSelect.classList.add('hidden');
-    providerModelInput.classList.remove('hidden');
-    providerModelInput.placeholder = '例如：llama3.2';
+    providerModelInput.classList.add('hidden');
     providerApikeyInput.value = '';
+    fetchOllamaModels(currentModel);
   } else {
     // custom
     providerApikeyField.classList.remove('hidden');
@@ -505,6 +545,12 @@ function updateProviderFormFields(type) {
 providerTypeSelect.addEventListener('change', () => {
   updateProviderFormFields(providerTypeSelect.value);
   verifyProviderStatus.classList.add('hidden');
+});
+
+providerBaseurlInput.addEventListener('change', () => {
+  if (providerTypeSelect.value === 'ollama') {
+    fetchOllamaModels(getOllamaModel());
+  }
 });
 
 function openProviderModal() {
@@ -540,11 +586,11 @@ function editProvider(id) {
   providerTypeSelect.value = provider.type;
   providerApikeyInput.value = provider.apiKey || '';
   providerBaseurlInput.value = provider.baseUrl || '';
-  updateProviderFormFields(provider.type);
+  updateProviderFormFields(provider.type, provider.model);
 
   if (provider.type === 'deepseek') {
     providerModelSelect.value = provider.model || 'deepseek-v4-flash';
-  } else {
+  } else if (provider.type !== 'ollama') {
     providerModelInput.value = provider.model || '';
   }
 
@@ -578,7 +624,7 @@ verifyProviderBtn.addEventListener('click', async () => {
     name: providerNameInput.value.trim() || 'test',
     apiKey: providerApikeyInput.value.trim(),
     baseUrl: providerBaseurlInput.value.trim(),
-    model: type === 'deepseek' ? providerModelSelect.value : providerModelInput.value.trim()
+    model: type === 'deepseek' ? providerModelSelect.value : (type === 'ollama' ? getOllamaModel() : providerModelInput.value.trim())
   };
 
   verifyProviderBtn.disabled = true;
@@ -592,12 +638,6 @@ verifyProviderBtn.addEventListener('click', async () => {
   if (result.success) {
     verifyProviderStatus.className = 'text-sm text-success';
     verifyProviderStatus.textContent = '✓ 连接成功';
-    if (result.models && result.models.length > 0 && type === 'ollama') {
-      // Populate ollama model input with first model as hint
-      if (!providerModelInput.value) {
-        providerModelInput.placeholder = result.models[0];
-      }
-    }
   } else {
     verifyProviderStatus.className = 'text-sm text-danger';
     verifyProviderStatus.textContent = `✗ ${result.error}`;
@@ -609,7 +649,7 @@ saveProviderBtn.addEventListener('click', async () => {
   const type = providerTypeSelect.value;
   const apiKey = providerApikeyInput.value.trim();
   const baseUrl = providerBaseurlInput.value.trim();
-  const model = type === 'deepseek' ? providerModelSelect.value : providerModelInput.value.trim();
+  const model = type === 'deepseek' ? providerModelSelect.value : (type === 'ollama' ? getOllamaModel() : providerModelInput.value.trim());
 
   if (!name) { alert('请填写 Provider 名称'); return; }
 
