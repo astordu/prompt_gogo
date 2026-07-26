@@ -88,6 +88,8 @@ class ShortcutService {
     this.onNotify = opts.onNotify || (() => {});
     /** @type {Map<string, Object>} accelerator → shortcutConfig */
     this._registered = new Map();
+    /** @type {Set<string>} shortcut ids that failed to register at startup */
+    this._inactiveIds = new Set();
   }
 
   // ------------------------------------------------------------------
@@ -98,10 +100,12 @@ class ShortcutService {
    * Register all persisted shortcuts at startup.
    * Unregisters everything first (full reset), then iterates the store.
    * Calls onNotify once with a summary if any shortcuts fail.
+   * Failed shortcuts are tracked as Inactive for the current session.
    */
   registerAllAtStartup() {
     this.registrar.unregisterAll();
     this._registered.clear();
+    this._inactiveIds.clear();
 
     const shortcuts = this.store.getShortcuts() || [];
     const failedNames = [];
@@ -110,6 +114,7 @@ class ShortcutService {
       const result = this._tryRegister(sc);
       if (!result.ok) {
         failedNames.push(sc.name);
+        this._inactiveIds.add(sc.id);
       }
     }
 
@@ -424,6 +429,9 @@ class ShortcutService {
     }
     this.store.setShortcuts(next);
 
+    // 6. Clear inactive status — this shortcut is now actively registered
+    this._inactiveIds.delete(shortcut.id);
+
     return { success: true };
   }
 
@@ -466,7 +474,50 @@ class ShortcutService {
     const next = shortcuts.filter(s => s.id !== id);
     this.store.setShortcuts(next);
 
+    this._inactiveIds.delete(id);
+
     return { success: true };
+  }
+
+  // ------------------------------------------------------------------
+  // Manual re-detection (user-triggered recovery)
+  // ------------------------------------------------------------------
+
+  /**
+   * Re-attempt registration of a single shortcut by id.
+   *
+   * If the shortcut's accelerator is already actively registered,
+   * returns recovered without doing anything.
+   *
+   * If the accelerator is not currently registered, attempts to register
+   * it. On success, clears the inactive status for this shortcut. On
+   * failure, the shortcut remains inactive.
+   *
+   * Does not unregister or re-register any other shortcut.
+   *
+   * @param {string} id
+   * @returns {{ recovered: true } | { recovered: false, reason: 'not-found' | 'duplicate' | 'rejected' | 'exception' }}
+   */
+  recheckShortcut(id) {
+    const shortcuts = this.store.getShortcuts() || [];
+    const target = shortcuts.find(s => s.id === id);
+    if (!target) {
+      return { recovered: false, reason: 'not-found' };
+    }
+
+    // Already active — nothing to do
+    if (this._registered.has(target.shortcut)) {
+      this._inactiveIds.delete(id);
+      return { recovered: true };
+    }
+
+    const result = this._tryRegister(target);
+    if (result.ok) {
+      this._inactiveIds.delete(id);
+      return { recovered: true };
+    }
+
+    return { recovered: false, reason: result.reason };
   }
 
   // ------------------------------------------------------------------
@@ -498,6 +549,16 @@ class ShortcutService {
     return this._registered.has(accelerator);
   }
 
+  /**
+   * Check whether a shortcut id is currently inactive (failed to register
+   * at startup or during the last recheck).
+   * @param {string} id
+   * @returns {boolean}
+   */
+  isShortcutInactive(id) {
+    return this._inactiveIds.has(id);
+  }
+
   // ------------------------------------------------------------------
   // Cleanup
   // ------------------------------------------------------------------
@@ -508,6 +569,7 @@ class ShortcutService {
   dispose() {
     this.registrar.unregisterAll();
     this._registered.clear();
+    this._inactiveIds.clear();
   }
 }
 

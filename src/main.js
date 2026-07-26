@@ -445,9 +445,15 @@ function showNotification(title, body) {
 
 // IPC Handlers
 ipcMain.handle('get-config', () => {
+  const shortcuts = shortcutService ? shortcutService.getShortcuts() : store.get('shortcuts');
+  // Annotate each shortcut with its active/inactive session status
+  const annotated = (shortcuts || []).map(sc => ({
+    ...sc,
+    inactive: shortcutService ? shortcutService.isShortcutInactive(sc.id) : false,
+  }));
   return {
     providers: store.get('providers'),
-    shortcuts: shortcutService ? shortcutService.getShortcuts() : store.get('shortcuts')
+    shortcuts: annotated
   };
 });
 
@@ -469,6 +475,10 @@ ipcMain.handle('recommend-shortcut', (event, accelerator, excludeId, shortcutNam
 
 ipcMain.handle('delete-shortcut', (event, id) => {
   return shortcutService.deleteShortcut(id);
+});
+
+ipcMain.handle('recheck-shortcut', (event, id) => {
+  return shortcutService.recheckShortcut(id);
 });
 
 ipcMain.handle('save-provider', (event, provider) => {

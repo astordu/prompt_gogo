@@ -904,15 +904,30 @@ function renderShortcuts() {
 
   emptyState.classList.add('hidden');
 
-  shortcutsTableBody.innerHTML = shortcuts.map(shortcut => `
+  shortcutsTableBody.innerHTML = shortcuts.map(shortcut => {
+    const isInactive = shortcut.inactive === true;
+    const inactiveBadge = isInactive
+      ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">冲突，未生效</span>`
+      : '';
+    const recheckBtn = isInactive
+      ? `<button class="recheck-btn inline-flex items-center gap-1 text-sm text-primary hover:underline cursor-pointer" data-id="${shortcut.id}">
+           <span class="material-symbols-outlined text-base">refresh</span>
+           <span>重新检测</span>
+         </button>`
+      : '';
+
+    return `
     <tr class="border-b border-border-light dark:border-border-dark last:border-b-0">
       <td class="px-6 py-4 whitespace-nowrap">
         ${formatShortcut(shortcut.shortcut)}
       </td>
-      <td class="px-6 py-4 text-text-primary-light dark:text-text-primary-dark">${escapeHtml(shortcut.name)}</td>
+      <td class="px-6 py-4 text-text-primary-light dark:text-text-primary-dark">
+        ${escapeHtml(shortcut.name)}${inactiveBadge}
+      </td>
       <td class="px-6 py-4 text-text-secondary-light dark:text-text-secondary-dark text-sm">${escapeHtml(getProviderLabel(shortcut.providerId))}</td>
       <td class="px-6 py-4 text-right">
-        <div class="flex justify-end gap-4">
+        <div class="flex justify-end items-center gap-4">
+          ${recheckBtn}
           <button class="edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-primary" data-id="${shortcut.id}">
             <span class="material-symbols-outlined">edit</span>
           </button>
@@ -922,7 +937,8 @@ function renderShortcuts() {
         </div>
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   // Add event listeners
   document.querySelectorAll('.edit-btn').forEach(btn => {
@@ -936,6 +952,13 @@ function renderShortcuts() {
     btn.addEventListener('click', (e) => {
       const id = e.currentTarget.getAttribute('data-id');
       deleteShortcut(id);
+    });
+  });
+
+  document.querySelectorAll('.recheck-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      recheckShortcut(id);
     });
   });
 }
@@ -1020,6 +1043,27 @@ async function deleteShortcut(id) {
   await window.electronAPI.deleteShortcut(id);
   shortcuts = shortcuts.filter(s => s.id !== id);
   renderShortcuts();
+}
+
+async function recheckShortcut(id) {
+  const result = await window.electronAPI.recheckShortcut(id);
+
+  if (result.recovered) {
+    // Update local state — the shortcut is now active
+    shortcuts = shortcuts.map(s =>
+      s.id === id ? { ...s, inactive: false } : s
+    );
+    renderShortcuts();
+  } else {
+    // Still inactive — show the reason
+    const sc = shortcuts.find(s => s.id === id);
+    const name = sc ? sc.name : '快捷键';
+    if (result.reason === 'not-found') {
+      alert(`「${name}」未找到。`);
+    } else {
+      alert(`「${name}」仍然无法注册，可能被其他应用占用。\n请进入编辑更换快捷键组合。`);
+    }
+  }
 }
 
 function openModal() {
@@ -1137,10 +1181,10 @@ savePromptBtn.addEventListener('click', async () => {
   if (currentEditingId) {
     const index = shortcuts.findIndex(s => s.id === currentEditingId);
     if (index >= 0) {
-      shortcuts[index] = shortcutData;
+      shortcuts[index] = { ...shortcutData, inactive: false };
     }
   } else {
-    shortcuts.push(shortcutData);
+    shortcuts.push({ ...shortcutData, inactive: false });
   }
 
   renderShortcuts();

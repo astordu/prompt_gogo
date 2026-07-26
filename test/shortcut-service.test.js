@@ -1259,3 +1259,321 @@ describe('recommendShortcut — original has Command', () => {
     assert.strictEqual(result.accelerator, 'Command+Alt+T');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: Inactive Shortcut tracking at startup
+// ---------------------------------------------------------------------------
+
+describe('registerAllAtStartup — inactive tracking', () => {
+  test('failed shortcuts are marked as inactive', () => {
+    const shortcuts = [
+      { id: '1', name: 'OK', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+      { id: '2', name: 'BAD', shortcut: 'CommandOrControl+Shift+B', template: 't2' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+B');
+
+    service.registerAllAtStartup();
+
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+    assert.strictEqual(service.isShortcutInactive('2'), true);
+  });
+
+  test('successful shortcuts are NOT marked as inactive', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+  });
+
+  test('shortcuts that throw on register are also marked inactive', () => {
+    const shortcuts = [
+      { id: '1', name: 'CRASH', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._throwOn('CommandOrControl+Shift+A');
+
+    service.registerAllAtStartup();
+
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+  });
+
+  test('multiple failures each get tracked as inactive', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'CommandOrControl+Shift+B', template: 't2' },
+      { id: '3', name: 'C', shortcut: 'CommandOrControl+Shift+C', template: 't3' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+    registrar._reject('CommandOrControl+Shift+C');
+
+    service.registerAllAtStartup();
+
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+    assert.strictEqual(service.isShortcutInactive('2'), false);
+    assert.strictEqual(service.isShortcutInactive('3'), true);
+  });
+});
+
+describe('registerAllAtStartup — single summary notification', () => {
+  test('sends exactly one notification when multiple shortcuts fail', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+      { id: '2', name: 'B', shortcut: 'CommandOrControl+Shift+B', template: 't2' },
+      { id: '3', name: 'C', shortcut: 'CommandOrControl+Shift+C', template: 't3' },
+    ];
+    const { service, registrar, notifier } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+    registrar._reject('CommandOrControl+Shift+B');
+
+    service.registerAllAtStartup();
+
+    assert.strictEqual(notifier._all().length, 1);
+    assert.strictEqual(notifier._all()[0].title, '快捷键注册失败');
+    assert.ok(notifier._all()[0].body.includes('A'));
+    assert.ok(notifier._all()[0].body.includes('B'));
+    assert.ok(!notifier._all()[0].body.includes('C'));
+  });
+
+  test('sends no notification when all shortcuts succeed', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, notifier } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    assert.strictEqual(notifier._all().length, 0);
+  });
+
+  test('sends one notification even with a single failure', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, registrar, notifier } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+
+    service.registerAllAtStartup();
+
+    assert.strictEqual(notifier._all().length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Manual re-detection (recheckShortcut)
+// ---------------------------------------------------------------------------
+
+describe('recheckShortcut — recovery', () => {
+  test('recovers an inactive shortcut when the accelerator is now available', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+
+    // Phase 1: startup with the shortcut rejected → inactive
+    const store = createFakeStore(shortcuts);
+    const registrar = createFakeRegistrar();
+    const notifier = createFakeNotifier();
+    const triggerHandler = createFakeTriggerHandler();
+    const service = new ShortcutService({
+      registrar,
+      store,
+      onTrigger: (sc) => triggerHandler.handle(sc),
+      onNotify: (title, body) => notifier.notify(title, body),
+    });
+    registrar._reject('CommandOrControl+Shift+A');
+    service.registerAllAtStartup();
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+
+    // Phase 2: the conflict clears — replace register to accept everything
+    const freshMap = new Map();
+    registrar.register = function(accelerator, callback) {
+      freshMap.set(accelerator, callback);
+      return true;
+    };
+
+    const result = service.recheckShortcut('1');
+    assert.strictEqual(result.recovered, true);
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+    assert.strictEqual(service.isAcceleratorActive('CommandOrControl+Shift+A'), true);
+  });
+
+  test('returns recovered:true if the shortcut was already active', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    const result = service.recheckShortcut('1');
+    assert.strictEqual(result.recovered, true);
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+  });
+
+  test('returns recovered:false when the conflict still exists', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+    service.registerAllAtStartup();
+
+    const result = service.recheckShortcut('1');
+    assert.strictEqual(result.recovered, false);
+    assert.ok(result.reason);
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+  });
+
+  test('returns not-found for unknown shortcut id', () => {
+    const { service } = makeService({ shortcuts: [] });
+    service.registerAllAtStartup();
+
+    const result = service.recheckShortcut('nonexistent');
+    assert.strictEqual(result.recovered, false);
+    assert.strictEqual(result.reason, 'not-found');
+  });
+
+  test('does not unregister or re-register other shortcuts', () => {
+    const shortcuts = [
+      { id: '1', name: 'OK', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+      { id: '2', name: 'BAD', shortcut: 'CommandOrControl+Shift+B', template: 't2' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+B');
+    service.registerAllAtStartup();
+
+    // Confirm OK is registered
+    assert.ok(registrar._has('CommandOrControl+Shift+A'));
+
+    // Try to recover BAD (still rejected)
+    const result = service.recheckShortcut('2');
+    assert.strictEqual(result.recovered, false);
+
+    // OK should still be registered — untouched
+    assert.ok(registrar._has('CommandOrControl+Shift+A'));
+    assert.strictEqual(registrar._size(), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Save clears inactive status
+// ---------------------------------------------------------------------------
+
+describe('saveShortcut — clears inactive status on success', () => {
+  test('saving an edited inactive shortcut with a new available accelerator clears inactive', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+    service.registerAllAtStartup();
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+
+    // Edit: change to a new accelerator that works
+    const updated = { id: '1', name: 'A', shortcut: 'Control+Alt+Shift+P', template: 't1' };
+    const result = service.saveShortcut(updated);
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+  });
+
+  test('saving a new shortcut does not mark it inactive', () => {
+    const { service } = makeService({ shortcuts: [] });
+    const sc = { id: '1', name: 'New', shortcut: 'Control+Alt+Shift+P', template: 't1' };
+    const result = service.saveShortcut(sc);
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Delete clears inactive status
+// ---------------------------------------------------------------------------
+
+describe('deleteShortcut — clears inactive status', () => {
+  test('deleting an inactive shortcut removes it from inactive set', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+    service.registerAllAtStartup();
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+
+    service.deleteShortcut('1');
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Legacy single-modifier compatibility
+// ---------------------------------------------------------------------------
+
+describe('legacy single-modifier shortcuts', () => {
+  test('startup registers legacy single-modifier shortcut that the system accepts', () => {
+    const shortcuts = [
+      { id: '1', name: 'Legacy', shortcut: 'CommandOrControl+P', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    // The fake registrar accepts anything by default
+    service.registerAllAtStartup();
+
+    assert.ok(registrar._has('CommandOrControl+P'));
+    assert.strictEqual(service.isShortcutInactive('1'), false);
+    assert.strictEqual(service.isAcceleratorActive('CommandOrControl+P'), true);
+  });
+
+  test('startup marks legacy single-modifier shortcut as inactive when it fails', () => {
+    const shortcuts = [
+      { id: '1', name: 'Legacy', shortcut: 'CommandOrControl+P', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+P');
+    service.registerAllAtStartup();
+
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+  });
+
+  test('editing a legacy shortcut enforces two-modifier minimum on save', () => {
+    const shortcuts = [
+      { id: '1', name: 'Legacy', shortcut: 'CommandOrControl+P', template: 't1' },
+    ];
+    const { service } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    // Try to save with a single-modifier shortcut (still single)
+    const updated = { id: '1', name: 'Legacy', shortcut: 'CommandOrControl+Q', template: 't1' };
+    const result = service.saveShortcut(updated);
+    // checkAvailability returns 'invalid' for single-modifier accelerators
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.reason, 'invalid');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: No background polling
+// ---------------------------------------------------------------------------
+
+describe('no background polling', () => {
+  test('recheckShortcut does not set up any timers or recurring checks', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'CommandOrControl+Shift+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    registrar._reject('CommandOrControl+Shift+A');
+    service.registerAllAtStartup();
+
+    // Call recheck — it should just return a result, not set up polling
+    const result = service.recheckShortcut('1');
+    assert.strictEqual(result.recovered, false);
+
+    // Calling it again should give the same result — no state change from polling
+    const result2 = service.recheckShortcut('1');
+    assert.strictEqual(result2.recovered, false);
+
+    // The shortcut is still inactive — no auto-recovery happened between calls
+    assert.strictEqual(service.isShortcutInactive('1'), true);
+  });
+});
+
