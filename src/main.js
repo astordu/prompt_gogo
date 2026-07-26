@@ -6,6 +6,7 @@ const { pipeToCursor } = require('./stream-output');
 const { createClipboardSink } = require('./clipboard-sink');
 const { replaceVariables } = require('./template');
 const { buildRequestConfig, validateProviderConfig, migrateToProviders } = require('./provider');
+const { ShortcutService, createElectronRegistrar, createElectronStore } = require('./shortcut-service');
 
 // Initialize config store
 const store = new Store({
@@ -30,6 +31,9 @@ const store = new Store({
 
 let mainWindow = null;
 let tray = null;
+
+// Shortcut management service (created in app.whenReady to ensure showNotification is available)
+let shortcutService = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -118,48 +122,16 @@ function registerShortcuts() {
   console.log('📌 开始注册快捷键...');
   console.log('========================================');
 
-  // Unregister all existing shortcuts
-  globalShortcut.unregisterAll();
+  const beforeCount = shortcutService ? shortcutService.getRegisteredAccelerators().length : 0;
 
-  const shortcuts = store.get('shortcuts');
-  console.log(`📋 共有 ${shortcuts.length} 个快捷键需要注册`);
+  shortcutService.registerAllAtStartup();
 
-  const registeredShortcuts = [];
-  const failedShortcuts = [];
-
-  shortcuts.forEach((shortcutConfig) => {
-    try {
-      // Check if shortcut is already registered in this session
-      if (registeredShortcuts.includes(shortcutConfig.shortcut)) {
-        console.warn(`Duplicate shortcut detected: ${shortcutConfig.shortcut}`);
-        failedShortcuts.push(shortcutConfig.name);
-        return;
-      }
-
-      const success = globalShortcut.register(shortcutConfig.shortcut, () => {
-        console.log(`\n🎯 快捷键回调被触发了！快捷键: ${shortcutConfig.shortcut}`);
-        handleShortcutTrigger(shortcutConfig);
-      });
-
-      if (!success) {
-        console.error(`❌ 失败: ${shortcutConfig.shortcut} for ${shortcutConfig.name} (可能被其他应用占用)`);
-        failedShortcuts.push(shortcutConfig.name);
-      } else {
-        registeredShortcuts.push(shortcutConfig.shortcut);
-        console.log(`✅ 成功: ${shortcutConfig.shortcut} → ${shortcutConfig.name}`);
-
-        // Verify registration
-        const isRegistered = globalShortcut.isRegistered(shortcutConfig.shortcut);
-        console.log(`   验证: ${isRegistered ? '✓ 已确认注册' : '✗ 注册验证失败'}`);
-      }
-    } catch (error) {
-      console.error(`Error registering shortcut ${shortcutConfig.shortcut}:`, error);
-      failedShortcuts.push(shortcutConfig.name);
-    }
-  });
+  const afterCount = shortcutService.getRegisteredAccelerators().length;
+  const shortcuts = shortcutService.getShortcuts();
+  const failedCount = shortcuts.length - afterCount;
 
   console.log('========================================');
-  console.log(`✅ 快捷键注册完成: ${registeredShortcuts.length} 个成功, ${failedShortcuts.length} 个失败`);
+  console.log(`✅ 快捷键注册完成: ${afterCount} 个成功, ${failedCount} 个失败`);
   console.log('========================================\n');
 
   // Register a test shortcut to verify the system is working
@@ -178,16 +150,6 @@ function registerShortcuts() {
 
   console.log('💡 现在可以在任意应用中选中文字并按快捷键测试！');
   console.log('💡 日志将显示在下方...\n');
-
-  // Notify user if any shortcuts failed to register
-  if (failedShortcuts.length > 0) {
-    setTimeout(() => {
-      showNotification(
-        '快捷键注册失败',
-        `以下快捷键无法注册: ${failedShortcuts.join(', ')}。可能被其他应用占用。`
-      );
-    }, 2000);
-  }
 }
 
 async function handleShortcutTrigger(shortcutConfig) {
@@ -485,36 +447,20 @@ function showNotification(title, body) {
 ipcMain.handle('get-config', () => {
   return {
     providers: store.get('providers'),
-    shortcuts: store.get('shortcuts')
+    shortcuts: shortcutService ? shortcutService.getShortcuts() : store.get('shortcuts')
   };
 });
 
 ipcMain.handle('get-shortcuts', () => {
-  return store.get('shortcuts');
+  return shortcutService ? shortcutService.getShortcuts() : store.get('shortcuts');
 });
 
 ipcMain.handle('save-shortcut', (event, shortcut) => {
-  const shortcuts = store.get('shortcuts');
-  const index = shortcuts.findIndex(s => s.id === shortcut.id);
-
-  if (index >= 0) {
-    shortcuts[index] = shortcut;
-  } else {
-    shortcuts.push(shortcut);
-  }
-
-  store.set('shortcuts', shortcuts);
-  registerShortcuts(); // Re-register shortcuts
-
-  return { success: true };
+  return shortcutService.saveShortcut(shortcut);
 });
 
 ipcMain.handle('delete-shortcut', (event, id) => {
-  const shortcuts = store.get('shortcuts').filter(s => s.id !== id);
-  store.set('shortcuts', shortcuts);
-  registerShortcuts(); // Re-register shortcuts
-
-  return { success: true };
+  return shortcutService.deleteShortcut(id);
 });
 
 ipcMain.handle('save-provider', (event, provider) => {
@@ -604,6 +550,20 @@ app.whenReady().then(() => {
 
   migrateTemplates();
   migrateProviders();
+
+  // Create the shortcut management service with injectable dependencies
+  shortcutService = new ShortcutService({
+    registrar: createElectronRegistrar(globalShortcut),
+    store: createElectronStore(store),
+    onTrigger: (shortcutConfig) => {
+      handleShortcutTrigger(shortcutConfig);
+    },
+    onNotify: (title, body) => {
+      // Delay notification to avoid race with startup
+      setTimeout(() => showNotification(title, body), 2000);
+    },
+  });
+
   registerShortcuts();
 
   app.on('activate', () => {
@@ -621,5 +581,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
+  if (shortcutService) {
+    shortcutService.dispose();
+  } else {
+    globalShortcut.unregisterAll();
+  }
 });
