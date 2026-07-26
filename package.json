@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/*.test.js && bash ralph/test-afk.sh",
     "dist": "electron-builder --mac dmg",
     "build": "electron-builder"
   },

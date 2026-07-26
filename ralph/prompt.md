@@ -21,7 +21,7 @@ GitHub issues 在上下文开头提供，包含所有 open issues 的正文和�
 - 遵守**阻塞关系**：如果某个 issue 标注了 "Blocked by #X" 且 #X 仍然 open，则跳过它。
 - 如果有多个未阻塞的 `ready-for-agent` issues，选优先级最高的。
 
-如果没有更多 `ready-for-agent` 任务需要完成，输出 <promise>NO MORE TASKS</promise>。
+如果当前没有未阻塞的 `ready-for-agent` 任务，明确说明阻塞状态；是否结束循环由外层脚本根据 GitHub Issues 的实时状态决定。
 
 # 探索
 
@@ -63,4 +63,4 @@ push所有代码到远程仓库
 # 最终规则
 
 - **只做当前一个任务**。
-- 如果所有 `ready-for-agent` 任务都已完成，输出 <promise>NO MORE TASKS</promise>。
+- 不要自行判断或声明整个 Ralph 循环已经完成；GitHub Issues 是任务状态的事实来源。
