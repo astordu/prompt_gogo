@@ -148,6 +148,69 @@ class ShortcutService {
   }
 
   // ------------------------------------------------------------------
+  // Availability check (dry-run, no side effects)
+  // ------------------------------------------------------------------
+
+  /**
+   * Check whether a candidate accelerator is valid and currently available
+   * for registration, without persisting anything or changing existing
+   * registrations.
+   *
+   * @param {string} accelerator - Electron accelerator string (e.g. "Control+Alt+9")
+   * @param {string} [excludeId] - Shortcut id being edited (its own accelerator is not a conflict)
+   * @returns {{ status: 'invalid' } | { status: 'available' } | { status: 'internal-conflict', conflictWith: string } | { status: 'external-conflict' } | { status: 'unavailable' }}
+   */
+  checkAvailability(accelerator, excludeId) {
+    // 1. Validate input: at least two modifiers + one regular key
+    if (!accelerator || typeof accelerator !== 'string') {
+      return { status: 'invalid' };
+    }
+
+    const parts = accelerator.split('+');
+    const modifierSet = new Set(['Control', 'Command', 'CommandOrControl', 'Alt', 'Shift']);
+    const modifiers = parts.filter(p => modifierSet.has(p));
+    const nonModifiers = parts.filter(p => !modifierSet.has(p));
+
+    if (modifiers.length < 2 || nonModifiers.length < 1) {
+      return { status: 'invalid' };
+    }
+
+    // 2. Internal conflict: check against all persisted shortcuts except the one being edited
+    const shortcuts = this.store.getShortcuts() || [];
+    for (const sc of shortcuts) {
+      if (excludeId && sc.id === excludeId) continue;
+      if (sc.shortcut === accelerator) {
+        return { status: 'internal-conflict', conflictWith: sc.name };
+      }
+    }
+
+    // 3. If the accelerator is already actively registered by us (and not excluded),
+    //    it's an internal conflict too. This covers session-only registrations.
+    //    But if excludeId matches the owner, skip.
+    if (this._registered.has(accelerator)) {
+      // Check if it's registered by the excluded shortcut
+      const registeredSc = this._registered.get(accelerator);
+      if (!excludeId || (registeredSc && registeredSc.id !== excludeId)) {
+        const name = registeredSc ? registeredSc.name : accelerator;
+        return { status: 'internal-conflict', conflictWith: name };
+      }
+    }
+
+    // 4. External conflict: attempt a temporary registration
+    try {
+      const ok = this.registrar.register(accelerator, () => {});
+      if (ok) {
+        // Immediately unregister — this was just a probe
+        this.registrar.unregister(accelerator);
+        return { status: 'available' };
+      }
+      return { status: 'external-conflict' };
+    } catch {
+      return { status: 'unavailable' };
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Save (create or update) — preserves existing behavior
   // ------------------------------------------------------------------
 

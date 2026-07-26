@@ -455,6 +455,173 @@ describe('dispose', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: checkAvailability
+// ---------------------------------------------------------------------------
+
+describe('checkAvailability — validation', () => {
+  test('returns invalid for fewer than two modifiers', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    const result = service.checkAvailability('Control+9');
+    assert.strictEqual(result.status, 'invalid');
+    // Must not call registrar for invalid input
+    assert.strictEqual(registrar._size(), 0);
+  });
+
+  test('returns invalid for modifiers only (no regular key)', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    const result = service.checkAvailability('Control+Shift');
+    assert.strictEqual(result.status, 'invalid');
+    assert.strictEqual(registrar._size(), 0);
+  });
+
+  test('returns invalid for empty string', () => {
+    const { service } = makeService({ shortcuts: [] });
+    const result = service.checkAvailability('');
+    assert.strictEqual(result.status, 'invalid');
+  });
+
+  test('returns invalid for null/undefined', () => {
+    const { service } = makeService({ shortcuts: [] });
+    assert.strictEqual(service.checkAvailability(null).status, 'invalid');
+    assert.strictEqual(service.checkAvailability(undefined).status, 'invalid');
+  });
+
+  test('does not call system registrar for invalid input', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    service.checkAvailability('Control+9');
+    // Registrar should have zero entries since no probe was attempted
+    assert.strictEqual(registrar._size(), 0);
+  });
+});
+
+describe('checkAvailability — available', () => {
+  test('returns available for a valid, unoccupied combo', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    const result = service.checkAvailability('Control+Alt+9');
+    assert.strictEqual(result.status, 'available');
+    // Probe must not leave a lingering registration
+    assert.strictEqual(registrar._size(), 0);
+  });
+
+  test('does not change persisted configuration', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service, store } = makeService({ shortcuts });
+    service.checkAvailability('Control+Alt+8');
+    const stored = store.getShortcuts();
+    assert.strictEqual(stored.length, 1);
+    assert.strictEqual(stored[0].shortcut, 'Control+Alt+9');
+  });
+
+  test('does not unregister existing shortcuts', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+    assert.ok(registrar._has('Control+Alt+9'));
+
+    service.checkAvailability('Control+Alt+8');
+
+    // The existing shortcut must still be registered
+    assert.ok(registrar._has('Control+Alt+9'));
+  });
+});
+
+describe('checkAvailability — internal conflict', () => {
+  test('returns internal-conflict when matching another persisted shortcut', () => {
+    const shortcuts = [
+      { id: '1', name: '整理文本', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service } = makeService({ shortcuts });
+    const result = service.checkAvailability('Control+Alt+9');
+    assert.strictEqual(result.status, 'internal-conflict');
+    assert.strictEqual(result.conflictWith, '整理文本');
+  });
+
+  test('editing a shortcut does not conflict with itself', () => {
+    const shortcuts = [
+      { id: '1', name: '整理文本', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service } = makeService({ shortcuts });
+    const result = service.checkAvailability('Control+Alt+9', '1');
+    assert.strictEqual(result.status, 'available');
+  });
+
+  test('internal conflict reports the correct shortcut name', () => {
+    const shortcuts = [
+      { id: '1', name: '翻译', shortcut: 'Control+Alt+0', template: 't1' },
+      { id: '2', name: '总结', shortcut: 'Control+Alt+9', template: 't2' },
+    ];
+    const { service } = makeService({ shortcuts });
+    const result = service.checkAvailability('Control+Alt+9');
+    assert.strictEqual(result.status, 'internal-conflict');
+    assert.strictEqual(result.conflictWith, '总结');
+  });
+});
+
+describe('checkAvailability — external conflict', () => {
+  test('returns external-conflict when registrar rejects the combo', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+    const result = service.checkAvailability('Control+Alt+9');
+    assert.strictEqual(result.status, 'external-conflict');
+    // Must not include a fabricated occupant name
+    assert.ok(!result.conflictWith);
+  });
+
+  test('does not include specific occupant name', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Command+Shift+A');
+    const result = service.checkAvailability('Command+Shift+A');
+    assert.strictEqual(result.status, 'external-conflict');
+    assert.strictEqual(result.conflictWith, undefined);
+  });
+});
+
+describe('checkAvailability — unavailable', () => {
+  test('returns unavailable when registrar throws', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._throwOn('Control+Alt+9');
+    const result = service.checkAvailability('Control+Alt+9');
+    assert.strictEqual(result.status, 'unavailable');
+  });
+
+  test('does not return a recommendation when unavailable', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._throwOn('Control+Alt+9');
+    const result = service.checkAvailability('Control+Alt+9');
+    assert.strictEqual(result.status, 'unavailable');
+    assert.strictEqual(result.recommendation, undefined);
+  });
+});
+
+describe('checkAvailability — no side effects', () => {
+  test('does not write to configuration store', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service, store } = makeService({ shortcuts });
+    service.checkAvailability('Control+Alt+8');
+    assert.strictEqual(store.getShortcuts().length, 1);
+  });
+
+  test('does not change current registration state', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+    const beforeCount = registrar._size();
+
+    service.checkAvailability('Control+Alt+8');
+
+    assert.strictEqual(registrar._size(), beforeCount);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests: behavior is externally unchanged (regression)
 // ---------------------------------------------------------------------------
 

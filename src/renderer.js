@@ -17,10 +17,124 @@ const savePromptBtn = document.getElementById('save-prompt');
 
 const promptNameInput = document.getElementById('prompt-name');
 const keyboardShortcutInput = document.getElementById('keyboard-shortcut');
+const shortcutAvailabilityStatus = document.getElementById('shortcut-availability-status');
 const promptTemplateInput = document.getElementById('prompt-template');
 const templateError = document.getElementById('template-error');
 const shortcutProviderSelect = document.getElementById('shortcut-provider');
 const shortcutProviderEmpty = document.getElementById('shortcut-provider-empty');
+
+// --- Shortcut availability check state ---
+// Tracks the latest check request so stale async results don't overwrite newer ones.
+let shortcutCheckToken = 0;
+// Cached result of the latest availability check for the current draft accelerator.
+let lastAvailabilityResult = null;
+
+const MODIFIER_NAMES = {
+  'Control': { symbol: '⌃', label: 'Control' },
+  'Command': { symbol: '⌘', label: 'Command' },
+  'CommandOrControl': { symbol: '⌘', label: 'Command' },
+  'Alt': { symbol: '⌥', label: 'Option' },
+  'Shift': { symbol: '⇧', label: 'Shift' },
+};
+
+function formatAcceleratorForDisplay(accelerator) {
+  const parts = accelerator.split('+');
+  return parts.map(part => {
+    const mod = MODIFIER_NAMES[part];
+    if (mod) {
+      return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${mod.label}">${mod.symbol}</kbd>`;
+    }
+    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${part}">${part}</kbd>`;
+  }).join(' ');
+}
+
+function isModifierOnly(part) {
+  return ['Control', 'Command', 'CommandOrControl', 'Alt', 'Shift'].includes(part);
+}
+
+function isValidShortcutFormat(accelerator) {
+  if (!accelerator) return false;
+  const parts = accelerator.split('+');
+  const modifiers = parts.filter(isModifierOnly);
+  const nonModifiers = parts.filter(p => !isModifierOnly(p));
+  return modifiers.length >= 2 && nonModifiers.length >= 1;
+}
+
+function showAvailabilityStatus(type, message) {
+  shortcutAvailabilityStatus.classList.remove('hidden', 'text-success', 'text-danger', 'text-text-secondary-light', 'dark:text-text-secondary-dark');
+  switch (type) {
+    case 'checking':
+      shortcutAvailabilityStatus.className = 'text-sm mt-2 text-text-secondary-light dark:text-text-secondary-dark';
+      break;
+    case 'available':
+      shortcutAvailabilityStatus.className = 'text-sm mt-2 text-success';
+      break;
+    case 'invalid':
+    case 'internal-conflict':
+    case 'external-conflict':
+      shortcutAvailabilityStatus.className = 'text-sm mt-2 text-danger';
+      break;
+    case 'unavailable':
+      shortcutAvailabilityStatus.className = 'text-sm mt-2 text-text-secondary-light dark:text-text-secondary-dark';
+      break;
+  }
+  shortcutAvailabilityStatus.textContent = message;
+}
+
+function hideAvailabilityStatus() {
+  shortcutAvailabilityStatus.classList.add('hidden');
+  shortcutAvailabilityStatus.textContent = '';
+}
+
+async function checkShortcutAvailability(accelerator, excludeId) {
+  const token = ++shortcutCheckToken;
+
+  if (!accelerator || !accelerator.trim()) {
+    hideAvailabilityStatus();
+    lastAvailabilityResult = null;
+    return null;
+  }
+
+  if (!isValidShortcutFormat(accelerator)) {
+    showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键（Control / Option / Shift / Command）加一个普通键。');
+    lastAvailabilityResult = { status: 'invalid' };
+    return { status: 'invalid' };
+  }
+
+  showAvailabilityStatus('checking', '正在检测…');
+
+  let result;
+  try {
+    result = await window.electronAPI.checkShortcutAvailability(accelerator, excludeId);
+  } catch {
+    result = { status: 'unavailable' };
+  }
+
+  // Stale check — a newer recording has started, discard this result
+  if (token !== shortcutCheckToken) return null;
+
+  lastAvailabilityResult = result;
+
+  switch (result.status) {
+    case 'available':
+      showAvailabilityStatus('available', '✓ 当前可用');
+      break;
+    case 'internal-conflict':
+      showAvailabilityStatus('internal-conflict', `✗ 与已有快捷键「${result.conflictWith}」重复`);
+      break;
+    case 'external-conflict':
+      showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用');
+      break;
+    case 'unavailable':
+      showAvailabilityStatus('unavailable', '暂时无法检测，请点击重新检测');
+      break;
+    default:
+      showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
+      break;
+  }
+
+  return result;
+}
 
 const macPermissionToggle = document.getElementById('mac-permission-toggle');
 const macPermissionContent = document.getElementById('mac-permission-content');
@@ -745,18 +859,23 @@ function formatShortcut(shortcut) {
   const parts = shortcut.split('+');
   return parts.map(part => {
     let displayName = part;
+    let ariaLabel = part;
     // 映射到 Mac 友好的显示名称
     if (part === 'CommandOrControl' || part === 'Command') {
       displayName = '⌘';
+      ariaLabel = 'Command';
     } else if (part === 'Control') {
       displayName = '⌃';
+      ariaLabel = 'Control';
     } else if (part === 'Alt' || part === 'Option') {
       displayName = '⌥';
+      ariaLabel = 'Option';
     } else if (part === 'Shift') {
       displayName = '⇧';
+      ariaLabel = 'Shift';
     }
-    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md">${displayName}</kbd>`;
-  }).join(' + ');
+    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${ariaLabel}">${displayName}</kbd>`;
+  }).join(' ');
 }
 
 function escapeHtml(text) {
@@ -781,6 +900,9 @@ addShortcutBtn.addEventListener('click', () => {
   keyboardShortcutInput.value = '';
   setTemplateEditor('');
   templateError.classList.add('hidden');
+  shortcutCheckToken++;
+  lastAvailabilityResult = null;
+  hideAvailabilityStatus();
   openModal();
 });
 
@@ -797,6 +919,9 @@ function editShortcut(id) {
   keyboardShortcutInput.value = shortcut.shortcut;
   setTemplateEditor(shortcut.template);
   templateError.classList.add('hidden');
+  shortcutCheckToken++;
+  lastAvailabilityResult = null;
+  hideAvailabilityStatus();
   openModal();
 }
 
@@ -817,6 +942,9 @@ function openModal() {
 function closeModal() {
   promptModal.classList.add('hidden');
   currentEditingId = null;
+  shortcutCheckToken++;
+  lastAvailabilityResult = null;
+  hideAvailabilityStatus();
 }
 
 closeModalBtn.addEventListener('click', closeModal);
@@ -839,6 +967,30 @@ savePromptBtn.addEventListener('click', async () => {
   // Validation
   if (!name || !shortcut || !template) {
     alert('请填写所有字段');
+    return;
+  }
+
+  // Re-check availability before saving (guard against status changes after initial check)
+  showAvailabilityStatus('checking', '正在检测…');
+  const checkResult = await window.electronAPI.checkShortcutAvailability(shortcut, currentEditingId);
+  shortcutCheckToken++; // invalidate any pending async checks
+  lastAvailabilityResult = checkResult;
+
+  if (checkResult.status !== 'available') {
+    switch (checkResult.status) {
+      case 'invalid':
+        showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
+        break;
+      case 'internal-conflict':
+        showAvailabilityStatus('internal-conflict', `✗ 与已有快捷键「${checkResult.conflictWith}」重复`);
+        break;
+      case 'external-conflict':
+        showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用');
+        break;
+      case 'unavailable':
+        showAvailabilityStatus('unavailable', '暂时无法检测，请重试');
+        break;
+    }
     return;
   }
 
@@ -945,6 +1097,8 @@ keyboardShortcutInput.addEventListener('keydown', (e) => {
   // 确保至少有修饰键+实际按键
   if (parts.length >= 2) {
     keyboardShortcutInput.value = parts.join('+');
+    // Trigger availability check when a complete combo is captured
+    checkShortcutAvailability(parts.join('+'), currentEditingId);
   }
 });
 

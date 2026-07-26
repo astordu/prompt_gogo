@@ -312,7 +312,8 @@
           <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="keyboard-shortcut">快捷键</label>
           <div class="relative">
             <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="keyboard-shortcut" placeholder="按下快捷键组合..." type="text"/>
-            <p class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-2">按下您想用于此快捷键的按键（例如：Control+Shift+1）。</p>
+            <p class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-2">至少需要两个修饰键（Control / Option / Shift / Command）加一个普通键。</p>
+            <p id="shortcut-availability-status" class="text-sm mt-2 hidden"></p>
           </div>
         </div>
         <div>

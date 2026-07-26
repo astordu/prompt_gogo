@@ -459,6 +459,10 @@ ipcMain.handle('save-shortcut', (event, shortcut) => {
   return shortcutService.saveShortcut(shortcut);
 });
 
+ipcMain.handle('check-shortcut-availability', (event, accelerator, excludeId) => {
+  return shortcutService.checkAvailability(accelerator, excludeId);
+});
+
 ipcMain.handle('delete-shortcut', (event, id) => {
   return shortcutService.deleteShortcut(id);
 });
