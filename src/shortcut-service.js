@@ -211,6 +211,149 @@ class ShortcutService {
   }
 
   // ------------------------------------------------------------------
+  // Recommendation
+  // ------------------------------------------------------------------
+
+  /**
+   * Parse an accelerator into modifiers and the main key.
+   * @private
+   * @param {string} accelerator
+   * @returns {{ modifiers: string[], mainKey: string|null }}
+   */
+  _parseAccelerator(accelerator) {
+    if (!accelerator) return { modifiers: [], mainKey: null };
+    const modifierSet = new Set(['Control', 'Command', 'CommandOrControl', 'Alt', 'Shift']);
+    const parts = accelerator.split('+');
+    const modifiers = parts.filter(p => modifierSet.has(p));
+    const nonModifiers = parts.filter(p => !modifierSet.has(p));
+    return { modifiers, mainKey: nonModifiers.length > 0 ? nonModifiers[nonModifiers.length - 1] : null };
+  }
+
+  /**
+   * Generate the fixed candidate pool for recommendation.
+   *
+   * Order:
+   * 1. Keep original main key, add missing modifiers in fixed order
+   *    (Control → Alt → Shift, optionally Command if original had it).
+   * 2. Try nearby digits/letters based on the original main key.
+   * 3. Fixed low-conflict pool: Control+Option+digit, then Control+Option+Shift+digit,
+   *    then Control+Option+letter, then Control+Option+Shift+letter.
+   *
+   * @private
+   * @param {string} accelerator - The conflicting draft accelerator
+   * @param {string} [shortcutName] - Name of the shortcut (for special first candidate)
+   * @returns {string[]} Ordered list of candidate accelerators
+   */
+  _generateCandidates(accelerator, shortcutName) {
+    const { modifiers, mainKey } = this._parseAccelerator(accelerator);
+    const originalHasCommand = modifiers.includes('Command') || modifiers.includes('CommandOrControl');
+    const candidates = [];
+
+    // --- Special first candidate for "整理文本内容" ---
+    if (shortcutName === '整理文本内容') {
+      candidates.push('Control+Alt+Shift+9');
+    }
+
+    // --- Phase 1: Keep original main key, add modifiers in fixed order ---
+    if (mainKey) {
+      // Start with Control+Alt+<key>
+      candidates.push(`Control+Alt+${mainKey}`);
+      // Then Control+Alt+Shift+<key>
+      candidates.push(`Control+Alt+Shift+${mainKey}`);
+      // If original had Command, also try Command+Control+<key> etc.
+      if (originalHasCommand) {
+        candidates.push(`Command+Alt+${mainKey}`);
+        candidates.push(`Command+Alt+Shift+${mainKey}`);
+      }
+    }
+
+    // --- Phase 2: Nearby digits ---
+    if (mainKey && /^\d$/.test(mainKey)) {
+      const num = parseInt(mainKey, 10);
+      for (const offset of [-1, 1, -2, 2]) {
+        const n = num + offset;
+        if (n >= 0 && n <= 9) {
+          candidates.push(`Control+Alt+${n}`);
+          candidates.push(`Control+Alt+Shift+${n}`);
+        }
+      }
+    }
+
+    // --- Phase 2b: Nearby letters ---
+    if (mainKey && /^[A-Z]$/.test(mainKey)) {
+      const code = mainKey.charCodeAt(0);
+      for (const offset of [-1, 1, -2, 2]) {
+        const c = String.fromCharCode(code + offset);
+        if (c >= 'A' && c <= 'Z') {
+          candidates.push(`Control+Alt+${c}`);
+          candidates.push(`Control+Alt+Shift+${c}`);
+        }
+      }
+    }
+
+    // --- Phase 3: Fixed low-conflict pool ---
+    // Digits 0-9 with Control+Option
+    for (let i = 0; i <= 9; i++) {
+      candidates.push(`Control+Alt+${i}`);
+    }
+    // Digits 0-9 with Control+Option+Shift
+    for (let i = 0; i <= 9; i++) {
+      candidates.push(`Control+Alt+Shift+${i}`);
+    }
+    // Letters A-Z with Control+Option
+    for (let c = 'A'.charCodeAt(0); c <= 'Z'.charCodeAt(0); c++) {
+      candidates.push(`Control+Alt+${String.fromCharCode(c)}`);
+    }
+    // Letters A-Z with Control+Option+Shift
+    for (let c = 'A'.charCodeAt(0); c <= 'Z'.charCodeAt(0); c++) {
+      candidates.push(`Control+Alt+Shift+${String.fromCharCode(c)}`);
+    }
+
+    // Deduplicate while preserving order
+    const seen = new Set();
+    return candidates.filter(c => {
+      if (seen.has(c)) return false;
+      seen.add(c);
+      return true;
+    });
+  }
+
+  /**
+   * Compute a verified, stable Shortcut Recommendation for the given draft.
+   *
+   * The algorithm generates candidates in a fixed order, then probes each
+   * one via checkAvailability. Only the first candidate that actually passes
+   * the availability check is returned. The recommendation excludes the
+   * shortcut being edited and skips all internal/external conflicts.
+   *
+   * The recommendation is never persisted. The user must explicitly click
+   * to adopt it, and the system re-checks at adoption time.
+   *
+   * @param {string} accelerator - The conflicting draft accelerator
+   * @param {string} [excludeId] - Shortcut id being edited (excluded from conflict checks)
+   * @param {string} [shortcutName] - Name of the shortcut (for special first candidates)
+   * @returns {{ accelerator: string } | null} First available candidate, or null if none pass
+   */
+  recommendShortcut(accelerator, excludeId, shortcutName) {
+    if (!accelerator) return null;
+
+    const candidates = this._generateCandidates(accelerator, shortcutName);
+
+    for (const candidate of candidates) {
+      // Exclude the candidate that's identical to the draft — we're
+      // looking for an alternative
+      if (candidate === accelerator) continue;
+
+      const check = this.checkAvailability(candidate, excludeId);
+      if (check.status === 'available') {
+        return { accelerator: candidate };
+      }
+    }
+
+    return null;
+  }
+
+  // ------------------------------------------------------------------
   // Save (atomic create or update)
   // ------------------------------------------------------------------
 

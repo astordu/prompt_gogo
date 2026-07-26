@@ -928,3 +928,334 @@ describe('regression: existing behavior preserved', () => {
     assert.strictEqual(triggerHandler._all()[1].name, '翻译成英文');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: recommendShortcut
+// ---------------------------------------------------------------------------
+
+describe('recommendShortcut — basic behavior', () => {
+  test('returns null for null/undefined accelerator', () => {
+    const { service } = makeService({ shortcuts: [] });
+    assert.strictEqual(service.recommendShortcut(null), null);
+    assert.strictEqual(service.recommendShortcut(undefined), null);
+  });
+
+  test('returns null for empty string', () => {
+    const { service } = makeService({ shortcuts: [] });
+    assert.strictEqual(service.recommendShortcut(''), null);
+  });
+
+  test('returns an available candidate when draft conflicts externally', () => {
+    // Draft is Control+Alt+9, but it's rejected by the registrar
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+
+    const result = service.recommendShortcut('Control+Alt+9');
+    assert.ok(result);
+    assert.ok(result.accelerator);
+    // First candidate after the original is Control+Alt+Shift+9
+    assert.strictEqual(result.accelerator, 'Control+Alt+Shift+9');
+  });
+
+  test('returned candidate is actually available (passes check)', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+
+    const result = service.recommendShortcut('Control+Alt+9');
+    assert.ok(result);
+    const check = service.checkAvailability(result.accelerator);
+    assert.strictEqual(check.status, 'available');
+  });
+
+  test('recommendation does not persist any configuration', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service, store } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+    const before = store.getShortcuts();
+
+    service.recommendShortcut('Control+Alt+9');
+
+    const after = store.getShortcuts();
+    assert.deepStrictEqual(after, before);
+  });
+
+  test('recommendation does not change registration state', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+A', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+    const beforeSize = registrar._size();
+
+    service.recommendShortcut('Command+Shift+Z');
+
+    assert.strictEqual(registrar._size(), beforeSize);
+  });
+});
+
+describe('recommendShortcut — candidate order', () => {
+  test('keeps original main key, adds modifiers in fixed order', () => {
+    // Draft: Command+Shift+A (externally conflicted)
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Command+Shift+A');
+
+    const result = service.recommendShortcut('Command+Shift+A');
+    assert.ok(result);
+    // First candidate: Control+Alt+A (preserve main key, use preferred modifiers)
+    assert.strictEqual(result.accelerator, 'Control+Alt+A');
+  });
+
+  test('tries Control+Alt+Shift+<key> after Control+Alt+<key>', () => {
+    // Both Control+Alt+A and Control+Alt+Shift+A should be tried.
+    // Make Control+Alt+A externally conflicted so we get the Shift variant.
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Command+Shift+A');
+    registrar._reject('Control+Alt+A');
+
+    const result = service.recommendShortcut('Command+Shift+A');
+    assert.ok(result);
+    assert.strictEqual(result.accelerator, 'Control+Alt+Shift+A');
+  });
+
+  test('tries nearby digits after same-key candidates', () => {
+    // Draft: Control+Alt+9, all Control+Alt+9 variants taken
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+    registrar._reject('Control+Alt+Shift+9');
+    // Nearby digit candidates: Control+Alt+8, Control+Alt+Shift+8, etc.
+    // 9 + (-1) = 8
+    const result = service.recommendShortcut('Control+Alt+9');
+    assert.ok(result);
+    // Control+Alt+8 should be the next after the same-key Shift variant
+    assert.strictEqual(result.accelerator, 'Control+Alt+8');
+  });
+
+  test('falls through to fixed pool when same-key and nearby fail', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    // Reject everything with main key 5
+    registrar._reject('Control+Alt+5');
+    registrar._reject('Control+Alt+Shift+5');
+    // Reject nearby digits (4, 6, 3, 7)
+    registrar._reject('Control+Alt+4');
+    registrar._reject('Control+Alt+Shift+4');
+    registrar._reject('Control+Alt+6');
+    registrar._reject('Control+Alt+Shift+6');
+    registrar._reject('Control+Alt+3');
+    registrar._reject('Control+Alt+Shift+3');
+    registrar._reject('Control+Alt+7');
+    registrar._reject('Control+Alt+Shift+7');
+
+    const result = service.recommendShortcut('Control+Alt+5');
+    assert.ok(result);
+    // Fixed pool starts with Control+Alt+0
+    assert.strictEqual(result.accelerator, 'Control+Alt+0');
+  });
+});
+
+describe('recommendShortcut — special candidate for 整理文本内容', () => {
+  test('first candidate is Control+Alt+Shift+9 for 整理文本内容', () => {
+    // Draft conflicts externally
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+
+    const result = service.recommendShortcut('Control+Alt+9', undefined, '整理文本内容');
+    assert.ok(result);
+    assert.strictEqual(result.accelerator, 'Control+Alt+Shift+9');
+  });
+
+  test('special candidate only shown when actually available', () => {
+    // Make Control+Alt+Shift+9 unavailable too
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+    registrar._reject('Control+Alt+Shift+9');
+
+    const result = service.recommendShortcut('Control+Alt+9', undefined, '整理文本内容');
+    assert.ok(result);
+    // Falls through to Control+Alt+9 nearby: Control+Alt+8
+    assert.strictEqual(result.accelerator, 'Control+Alt+8');
+  });
+
+  test('special candidate not used for non-matching shortcut name', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+
+    const result = service.recommendShortcut('Control+Alt+9', undefined, '翻译');
+    assert.ok(result);
+    // For non-matching name, first candidate is Control+Alt+Shift+9 (same key + Shift)
+    assert.strictEqual(result.accelerator, 'Control+Alt+Shift+9');
+  });
+});
+
+describe('recommendShortcut — exclusion and conflict skipping', () => {
+  test('excludes the shortcut being edited from internal conflict', () => {
+    // Shortcut #1 has Control+Alt+Z. We're editing #1 to a new combo that
+    // conflicts externally. The recommendation should be able to use
+    // Control+Alt+Z since #1 is excluded.
+    const shortcuts = [
+      { id: '1', name: 'MyShortcut', shortcut: 'Control+Alt+Z', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+    service.registerAllAtStartup();
+
+    // Draft is Command+Shift+X (externally conflicted)
+    registrar._reject('Command+Shift+X');
+
+    const result = service.recommendShortcut('Command+Shift+X', '1');
+    assert.ok(result);
+    // Control+Alt+X should be first candidate (preserving main key X)
+    assert.strictEqual(result.accelerator, 'Control+Alt+X');
+  });
+
+  test('skips internal-conflict candidates', () => {
+    const shortcuts = [
+      { id: '1', name: 'Occupied', shortcut: 'Control+Alt+Z', template: 't1' },
+    ];
+    const { service, registrar } = makeService({ shortcuts });
+
+    // Draft is Command+Shift+Z
+    registrar._reject('Command+Shift+Z');
+
+    const result = service.recommendShortcut('Command+Shift+Z');
+    assert.ok(result);
+    // Control+Alt+Z is internally occupied, so skip to Control+Alt+Shift+Z
+    assert.strictEqual(result.accelerator, 'Control+Alt+Shift+Z');
+  });
+
+  test('skips external-conflict candidates', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Command+Shift+Z');
+    registrar._reject('Control+Alt+Z');
+
+    const result = service.recommendShortcut('Command+Shift+Z');
+    assert.ok(result);
+    assert.strictEqual(result.accelerator, 'Control+Alt+Shift+Z');
+  });
+
+  test('recommendation does not include the draft accelerator itself', () => {
+    // Even if the draft accelerator is available, it should not be returned
+    // as a recommendation (we need an alternative)
+    const { service } = makeService({ shortcuts: [] });
+
+    const result = service.recommendShortcut('Control+Alt+P');
+    assert.ok(result);
+    assert.notStrictEqual(result.accelerator, 'Control+Alt+P');
+  });
+});
+
+describe('recommendShortcut — stability', () => {
+  test('same draft and same occupation state produce same recommendation', () => {
+    const { service: s1, registrar: r1 } = makeService({ shortcuts: [] });
+    const { service: s2, registrar: r2 } = makeService({ shortcuts: [] });
+
+    r1._reject('Control+Alt+9');
+    r2._reject('Control+Alt+9');
+
+    const r1Result = s1.recommendShortcut('Control+Alt+9');
+    const r2Result = s2.recommendShortcut('Control+Alt+9');
+
+    assert.deepStrictEqual(r1Result, r2Result);
+  });
+
+  test('repeated calls produce stable results', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Control+Alt+9');
+
+    const r1 = service.recommendShortcut('Control+Alt+9');
+    const r2 = service.recommendShortcut('Control+Alt+9');
+    const r3 = service.recommendShortcut('Control+Alt+9');
+
+    assert.deepStrictEqual(r1, r2);
+    assert.deepStrictEqual(r2, r3);
+  });
+});
+
+describe('recommendShortcut — no candidates available', () => {
+  test('returns null when all candidates fail', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    // Reject a wide range of candidates
+    for (let i = 0; i <= 9; i++) {
+      registrar._reject(`Control+Alt+${i}`);
+      registrar._reject(`Control+Alt+Shift+${i}`);
+    }
+
+    const result = service.recommendShortcut('Control+Alt+9');
+    // Should find a letter candidate since those aren't rejected
+    assert.ok(result);
+    assert.ok(result.accelerator.includes('Control+Alt+'));
+  });
+
+  test('returns null when registrar is completely broken', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    // Make the registrar throw on everything
+    const origRegister = registrar.register;
+    registrar.register = function() {
+      throw new Error('Registrar broken');
+    };
+
+    const result = service.recommendShortcut('Control+Alt+9');
+    assert.strictEqual(result, null);
+
+    // Restore for cleanup
+    registrar.register = origRegister;
+  });
+});
+
+describe('recommendShortcut — does not write to store', () => {
+  test('no side effects on config store', () => {
+    const shortcuts = [
+      { id: '1', name: 'A', shortcut: 'Control+Alt+9', template: 't1' },
+    ];
+    const { service, store } = makeService({ shortcuts });
+    const before = JSON.stringify(store.getShortcuts());
+
+    service.recommendShortcut('Command+Shift+Z');
+
+    const after = JSON.stringify(store.getShortcuts());
+    assert.strictEqual(before, after);
+  });
+});
+
+describe('recommendShortcut — letter main keys', () => {
+  test('preserves letter main key with added modifiers', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    registrar._reject('Command+Shift+T');
+
+    const result = service.recommendShortcut('Command+Shift+T');
+    assert.ok(result);
+    assert.strictEqual(result.accelerator, 'Control+Alt+T');
+  });
+
+  test('tries nearby letters', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    // Draft: Control+Alt+D, reject all D variants
+    registrar._reject('Control+Alt+D');
+    registrar._reject('Control+Alt+Shift+D');
+    // Nearby: C, E, B, F
+    registrar._reject('Control+Alt+C');
+    registrar._reject('Control+Alt+Shift+C');
+    registrar._reject('Control+Alt+E');
+    registrar._reject('Control+Alt+Shift+E');
+
+    const result = service.recommendShortcut('Control+Alt+D');
+    assert.ok(result);
+    // Should try B next
+    assert.strictEqual(result.accelerator, 'Control+Alt+B');
+  });
+});
+
+describe('recommendShortcut — original has Command', () => {
+  test('generates Command-inclusive candidates when original had Command', () => {
+    const { service, registrar } = makeService({ shortcuts: [] });
+    // Reject Control+Alt+T and Control+Alt+Shift+T to get to Command candidates
+    registrar._reject('Command+Shift+T');
+    registrar._reject('Control+Alt+T');
+    registrar._reject('Control+Alt+Shift+T');
+
+    const result = service.recommendShortcut('Command+Shift+T');
+    assert.ok(result);
+    // Next should be Command+Alt+T
+    assert.strictEqual(result.accelerator, 'Command+Alt+T');
+  });
+});

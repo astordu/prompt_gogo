@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveShortcut: (shortcut) => ipcRenderer.invoke('save-shortcut', shortcut),
   deleteShortcut: (id) => ipcRenderer.invoke('delete-shortcut', id),
   checkShortcutAvailability: (accelerator, excludeId) => ipcRenderer.invoke('check-shortcut-availability', accelerator, excludeId),
+  recommendShortcut: (accelerator, excludeId, shortcutName) => ipcRenderer.invoke('recommend-shortcut', accelerator, excludeId, shortcutName),
 
   // Providers
   saveProvider: (provider) => ipcRenderer.invoke('save-provider', provider),

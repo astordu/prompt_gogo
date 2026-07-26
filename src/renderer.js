@@ -18,6 +18,10 @@ const savePromptBtn = document.getElementById('save-prompt');
 const promptNameInput = document.getElementById('prompt-name');
 const keyboardShortcutInput = document.getElementById('keyboard-shortcut');
 const shortcutAvailabilityStatus = document.getElementById('shortcut-availability-status');
+const shortcutRecommendation = document.getElementById('shortcut-recommendation');
+const adoptRecommendationBtn = document.getElementById('adopt-recommendation-btn');
+const recommendationText = document.getElementById('recommendation-text');
+const noRecommendation = document.getElementById('no-recommendation');
 const promptTemplateInput = document.getElementById('prompt-template');
 const templateError = document.getElementById('template-error');
 const shortcutProviderSelect = document.getElementById('shortcut-provider');
@@ -91,12 +95,14 @@ async function checkShortcutAvailability(accelerator, excludeId) {
 
   if (!accelerator || !accelerator.trim()) {
     hideAvailabilityStatus();
+    hideRecommendation();
     lastAvailabilityResult = null;
     return null;
   }
 
   if (!isValidShortcutFormat(accelerator)) {
     showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键（Control / Option / Shift / Command）加一个普通键。');
+    hideRecommendation();
     lastAvailabilityResult = { status: 'invalid' };
     return { status: 'invalid' };
   }
@@ -118,23 +124,102 @@ async function checkShortcutAvailability(accelerator, excludeId) {
   switch (result.status) {
     case 'available':
       showAvailabilityStatus('available', '✓ 当前可用');
+      hideRecommendation();
       break;
     case 'internal-conflict':
       showAvailabilityStatus('internal-conflict', `✗ 与已有快捷键「${result.conflictWith}」重复`);
+      fetchRecommendation(accelerator, excludeId);
       break;
     case 'external-conflict':
       showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用');
+      fetchRecommendation(accelerator, excludeId);
       break;
     case 'unavailable':
       showAvailabilityStatus('unavailable', '暂时无法检测，请点击重新检测');
+      hideRecommendation();
       break;
     default:
       showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
+      hideRecommendation();
       break;
   }
 
   return result;
 }
+
+// --- Shortcut Recommendation ---
+
+function hideRecommendation() {
+  shortcutRecommendation.classList.add('hidden');
+  noRecommendation.classList.add('hidden');
+  recommendationText.textContent = '';
+}
+
+/**
+ * Fetch a recommendation when the availability check returns a conflict.
+ * Uses the current draft accelerator and the shortcut name (for special
+ * first candidates like "整理文本内容").
+ */
+async function fetchRecommendation(accelerator, excludeId) {
+  if (!accelerator || !isValidShortcutFormat(accelerator)) {
+    hideRecommendation();
+    return;
+  }
+
+  // Determine the shortcut name for special-candidate logic
+  const shortcutName = promptNameInput.value.trim() || undefined;
+
+  let result;
+  try {
+    result = await window.electronAPI.recommendShortcut(accelerator, excludeId, shortcutName);
+  } catch {
+    result = null;
+  }
+
+  if (result && result.accelerator) {
+    const display = formatAcceleratorForDisplay(result.accelerator);
+    recommendationText.innerHTML = '推荐使用 ' + display;
+    shortcutRecommendation.classList.remove('hidden');
+    noRecommendation.classList.add('hidden');
+    // Store the recommended accelerator on the button for re-check on click
+    adoptRecommendationBtn.dataset.accelerator = result.accelerator;
+  } else {
+    hideRecommendation();
+    noRecommendation.classList.remove('hidden');
+  }
+}
+
+/**
+ * Handle clicking the recommendation button.
+ * Re-checks the recommended accelerator. If it's still available, writes it
+ * to the draft input and triggers a new availability check. If it's no longer
+ * available, fetches the next candidate from the fixed sequence.
+ */
+adoptRecommendationBtn.addEventListener('click', async () => {
+  const recommended = adoptRecommendationBtn.dataset.accelerator;
+  if (!recommended) return;
+
+  // Re-check the recommended accelerator
+  let check;
+  try {
+    check = await window.electronAPI.checkShortcutAvailability(recommended, currentEditingId);
+  } catch {
+    check = { status: 'unavailable' };
+  }
+
+  if (check.status === 'available') {
+    // Write to draft and trigger availability display
+    keyboardShortcutInput.value = recommended;
+    shortcutCheckToken++;
+    lastAvailabilityResult = check;
+    showAvailabilityStatus('available', '✓ 当前可用');
+    hideRecommendation();
+  } else {
+    // The recommended candidate is no longer available — fetch the next one
+    // by asking for a new recommendation starting from the stale candidate
+    fetchRecommendation(recommended, currentEditingId);
+  }
+});
 
 const macPermissionToggle = document.getElementById('mac-permission-toggle');
 const macPermissionContent = document.getElementById('mac-permission-content');
@@ -903,6 +988,7 @@ addShortcutBtn.addEventListener('click', () => {
   shortcutCheckToken++;
   lastAvailabilityResult = null;
   hideAvailabilityStatus();
+  hideRecommendation();
   openModal();
 });
 
@@ -922,6 +1008,7 @@ function editShortcut(id) {
   shortcutCheckToken++;
   lastAvailabilityResult = null;
   hideAvailabilityStatus();
+  hideRecommendation();
   openModal();
 }
 
@@ -945,6 +1032,7 @@ function closeModal() {
   shortcutCheckToken++;
   lastAvailabilityResult = null;
   hideAvailabilityStatus();
+  hideRecommendation();
 }
 
 closeModalBtn.addEventListener('click', closeModal);
@@ -1023,18 +1111,23 @@ savePromptBtn.addEventListener('click', async () => {
     switch (saveResult.reason) {
       case 'invalid':
         showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
+        hideRecommendation();
         break;
       case 'internal-conflict':
         showAvailabilityStatus('internal-conflict', '✗ 与已有快捷键重复，请更换组合');
+        fetchRecommendation(shortcut, currentEditingId);
         break;
       case 'external-conflict':
         showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用，请更换组合');
+        fetchRecommendation(shortcut, currentEditingId);
         break;
       case 'unavailable':
         showAvailabilityStatus('unavailable', '暂时无法检测，请重试');
+        hideRecommendation();
         break;
       case 'registration-failed':
         showAvailabilityStatus('external-conflict', '✗ 注册失败，该组合可能已被占用');
+        fetchRecommendation(shortcut, currentEditingId);
         break;
     }
     return;

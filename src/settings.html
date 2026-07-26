@@ -314,6 +314,13 @@
             <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="keyboard-shortcut" placeholder="按下快捷键组合..." type="text"/>
             <p class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-2">至少需要两个修饰键（Control / Option / Shift / Command）加一个普通键。</p>
             <p id="shortcut-availability-status" class="text-sm mt-2 hidden"></p>
+            <div id="shortcut-recommendation" class="mt-2 hidden">
+              <button type="button" id="adopt-recommendation-btn" class="inline-flex items-center gap-2 text-sm text-primary hover:underline cursor-pointer">
+                <span class="material-symbols-outlined text-base">lightbulb</span>
+                <span id="recommendation-text"></span>
+              </button>
+            </div>
+            <p id="no-recommendation" class="text-sm mt-2 text-text-secondary-light dark:text-text-secondary-dark hidden">没有可用的推荐组合，请手动尝试其他按键。</p>
           </div>
         </div>
         <div>

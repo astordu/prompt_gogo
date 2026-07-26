@@ -463,6 +463,10 @@ ipcMain.handle('check-shortcut-availability', (event, accelerator, excludeId) =>
   return shortcutService.checkAvailability(accelerator, excludeId);
 });
 
+ipcMain.handle('recommend-shortcut', (event, accelerator, excludeId, shortcutName) => {
+  return shortcutService.recommendShortcut(accelerator, excludeId, shortcutName);
+});
+
 ipcMain.handle('delete-shortcut', (event, id) => {
   return shortcutService.deleteShortcut(id);
 });
