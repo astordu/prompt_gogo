@@ -12,6 +12,7 @@
 const { execFileSync } = require('child_process');
 
 const PASTE_ARGS = ['-e', 'tell application "System Events" to keystroke "v" using command down'];
+const BACKSPACE_ARGS = ['-e', 'tell application "System Events" to key code 51'];
 const CLIPBOARD_SETTLE_MS = 10;
 const PASTE_SETTLE_MS = 30;
 const BACKSPACE_SETTLE_MS = 30;
@@ -42,7 +43,7 @@ function createRunIndicatorSink(deps) {
   const cb = (deps && deps.clipboard) || null;
   const paste = (deps && deps.paste) || (() => execFileSync('osascript', PASTE_ARGS));
   const backspace = (deps && deps.backspace) || (() => {
-    execFileSync('osascript', ['-e', 'tell application "System Events" to keystroke (ASCII character 127)']);
+    execFileSync('osascript', BACKSPACE_ARGS);
   });
 
   /**
@@ -69,4 +70,4 @@ function createRunIndicatorSink(deps) {
   return { write, deleteBack };
 }
 
-module.exports = { createRunIndicatorSink, LOADING_TEXT };
+module.exports = { createRunIndicatorSink, LOADING_TEXT, BACKSPACE_ARGS };
