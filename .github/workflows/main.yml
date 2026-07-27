@@ -15,7 +15,7 @@ concurrency:
 jobs:
   triage:
     name: 运行项目分流技能
-    if: ${{ !contains(github.event.comment.body, 'Triage') }}
+    if: ${{ toJSON(github.event.issue.labels) == '[]' }}
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 15
 
