@@ -3,6 +3,7 @@
 const { describe, test, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const { RunCoordinator, CANCEL_ACCELERATOR } = require('../src/run-coordinator');
+const { pipeToCursor } = require('../src/stream-output');
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -1218,5 +1219,325 @@ describe('Loading — backward compatibility without runIndicator', () => {
     const restored = await coordinator.abortLoading();
     assert.strictEqual(restored, true);
     assert.strictEqual(coordinator.isShowingLoading(), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: AbortSignal for HTTP/SSE cancellation
+// ---------------------------------------------------------------------------
+
+describe('AbortSignal — lifecycle', () => {
+  test('getAbortSignal returns null when no Run is active', () => {
+    const { coordinator } = makeCoordinator();
+    assert.strictEqual(coordinator.getAbortSignal(), null);
+  });
+
+  test('getAbortSignal returns a valid signal after beginRun', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const signal = coordinator.getAbortSignal();
+    assert.ok(signal);
+    assert.strictEqual(signal.aborted, false);
+  });
+
+  test('signal is aborted after cancel()', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const signal = coordinator.getAbortSignal();
+    assert.strictEqual(signal.aborted, false);
+    coordinator.cancel();
+    assert.strictEqual(signal.aborted, true);
+  });
+
+  test('getAbortSignal returns null after endRun', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    coordinator.endRun();
+    assert.strictEqual(coordinator.getAbortSignal(), null);
+  });
+
+  test('each Run gets a fresh signal', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const signal1 = coordinator.getAbortSignal();
+    coordinator.cancel();
+    assert.strictEqual(signal1.aborted, true);
+
+    coordinator.endRun();
+    coordinator.beginRun();
+    const signal2 = coordinator.getAbortSignal();
+    assert.notStrictEqual(signal1, signal2);
+    assert.strictEqual(signal2.aborted, false);
+  });
+
+  test('signal is not aborted on endRun without cancel', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const signal = coordinator.getAbortSignal();
+    coordinator.endRun();
+    // Signal object still exists (caller may hold a reference) but is not aborted
+    assert.strictEqual(signal.aborted, false);
+  });
+
+  test('cancel without active Run does not create or abort a signal', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.cancel();
+    assert.strictEqual(coordinator.getAbortSignal(), null);
+  });
+
+  test('cancel is idempotent — signal stays aborted', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    coordinator.cancel();
+    const signal = coordinator.getAbortSignal();
+    coordinator.cancel();
+    assert.strictEqual(signal.aborted, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: RunCoordinator + pipeToCursor cancellation
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a memory sink for integration tests.
+ */
+function createIntegrationSink() {
+  const writes = [];
+  let closed = false;
+  return {
+    async write(text) { writes.push(text); },
+    async close() { closed = true; },
+    writes,
+    get isClosed() { return closed; },
+  };
+}
+
+describe('Integration — streaming cancellation', () => {
+  test('cancel after partial output preserves already-written content', async () => {
+    const { coordinator } = makeCoordinator();
+    const sink = createIntegrationSink();
+
+    coordinator.beginRun();
+
+    // Simulate: first content arrives, then cancel mid-stream
+    async function* chunks() {
+      yield 'a'.repeat(30); // first batch — written (threshold met)
+      coordinator.cancel(); // cancel after first content
+      yield 'b'.repeat(30); // should be discarded or never arrive
+    }
+
+    const signal = coordinator.getAbortSignal();
+    await pipeToCursor(chunks(), sink, signal);
+
+    // Only the first batch was written
+    assert.strictEqual(sink.writes.length, 1);
+    assert.strictEqual(sink.writes[0], 'a'.repeat(30));
+    assert.ok(sink.isClosed);
+    assert.strictEqual(coordinator.isCancelled(), true);
+  });
+
+  test('cancel during buffering discards unwritten buffer', async () => {
+    const { coordinator } = makeCoordinator();
+    const sink = createIntegrationSink();
+
+    coordinator.beginRun();
+
+    async function* chunks() {
+      yield 'a'.repeat(30); // written immediately
+      yield 'b'.repeat(10); // buffered (below threshold)
+      coordinator.cancel();
+      yield 'c'.repeat(30); // should not be written
+    }
+
+    const signal = coordinator.getAbortSignal();
+    await pipeToCursor(chunks(), sink, signal);
+
+    // 'a' batch is written; 'b' is discarded from buffer
+    assert.strictEqual(sink.writes.length, 1);
+    assert.strictEqual(sink.writes[0], 'a'.repeat(30));
+    assert.ok(sink.isClosed);
+  });
+
+  test('cancel via Cancel Shortcut during streaming stops output', async () => {
+    const { coordinator, registrar } = makeCoordinator();
+    const sink = createIntegrationSink();
+
+    coordinator.beginRun();
+
+    async function* chunks() {
+      yield 'a'.repeat(30); // written
+      // Simulate user pressing Command+Escape
+      registrar._trigger(CANCEL_ACCELERATOR);
+      yield 'b'.repeat(30); // should not be written
+    }
+
+    const signal = coordinator.getAbortSignal();
+    await pipeToCursor(chunks(), sink, signal);
+
+    assert.strictEqual(coordinator.isCancelled(), true);
+    assert.strictEqual(sink.writes.length, 1);
+    assert.ok(sink.isClosed);
+  });
+
+  test('no late writes after cancel — timer callbacks do not fire', async () => {
+    const { coordinator } = makeCoordinator();
+    const sink = createIntegrationSink();
+
+    coordinator.beginRun();
+
+    async function* chunks() {
+      yield 'tiny'; // below threshold, buffered
+      coordinator.cancel();
+      // After cancel, wait a bit to let any timer fire
+      await new Promise(r => setTimeout(r, 300));
+      yield 'late-content'; // should never be written
+    }
+
+    const signal = coordinator.getAbortSignal();
+    await pipeToCursor(chunks(), sink, signal);
+
+    // Nothing should have been written (buffer was discarded on abort)
+    assert.strictEqual(sink.writes.length, 0);
+    assert.ok(sink.isClosed);
+  });
+
+  test('normal completion without cancel writes all content', async () => {
+    const { coordinator } = makeCoordinator();
+    const sink = createIntegrationSink();
+
+    coordinator.beginRun();
+
+    async function* chunks() {
+      yield 'Hello';
+      yield ' ';
+      yield 'World';
+    }
+
+    const signal = coordinator.getAbortSignal();
+    await pipeToCursor(chunks(), sink, signal);
+
+    assert.strictEqual(sink.writes.join(''), 'Hello World');
+    assert.strictEqual(coordinator.isCancelled(), false);
+    assert.ok(sink.isClosed);
+  });
+
+  test('target invalidation during streaming stops all writes', async () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    const writes = [];
+    let closed = false;
+
+    coordinator.beginRun();
+
+    // Sink that validates target before writing (like validatingSink in main.js)
+    const validatingSink = {
+      async write(text) {
+        if (!coordinator.validateTarget()) {
+          throw new Error('Output Target invalid');
+        }
+        writes.push(text);
+      },
+      async close() { closed = true; },
+    };
+
+    async function* chunks() {
+      yield 'a'.repeat(30); // written successfully
+      // Target becomes invalid after first write
+      outputTarget._invalidate();
+      yield 'b'.repeat(30); // should trigger invalid error
+    }
+
+    const signal = coordinator.getAbortSignal();
+
+    // pipeToCursor will throw when the sink throws
+    await assert.rejects(
+      pipeToCursor(chunks(), validatingSink, signal),
+      /Output Target invalid/
+    );
+
+    // Only first batch was written
+    assert.strictEqual(writes.length, 1);
+    assert.strictEqual(writes[0], 'a'.repeat(30));
+    assert.ok(coordinator.isTargetInvalid());
+    assert.ok(closed); // sink.close() still called in finally
+  });
+
+  test('partial output + error preserves already-written content', async () => {
+    const { coordinator } = makeCoordinator();
+    const writes = [];
+
+    coordinator.beginRun();
+
+    // Simulate: some content written, then stream errors
+    const sink = {
+      async write(text) {
+        if (!coordinator.validateTarget()) {
+          throw new Error('Output Target invalid');
+        }
+        writes.push(text);
+      },
+      async close() {},
+    };
+
+    async function* chunks() {
+      yield 'a'.repeat(30);
+      yield 'b'.repeat(30);
+      throw new Error('stream error');
+    }
+
+    const signal = coordinator.getAbortSignal();
+
+    await assert.rejects(
+      pipeToCursor(chunks(), sink, signal),
+      /stream error/
+    );
+
+    // Both batches were written before the error
+    assert.strictEqual(writes.length, 2);
+    assert.strictEqual(writes.join(''), 'a'.repeat(30) + 'b'.repeat(30));
+    assert.strictEqual(coordinator.isCancelled(), false);
+  });
+
+  test('cancel during Loading phase aborts and restores original text', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original text');
+
+    // Simulate cancel during Loading
+    coordinator.cancel();
+    const signal = coordinator.getAbortSignal();
+    assert.strictEqual(signal.aborted, true);
+
+    const restored = await coordinator.abortLoading();
+    assert.strictEqual(restored, true);
+
+    // Verify original text was restored
+    const ops = runIndicator._operations();
+    const lastWrite = ops.filter(o => o.type === 'write').pop();
+    assert.strictEqual(lastWrite.text, 'original text');
+  });
+
+  test('cancel preserves first content but does not show Ending or restore original', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    const sink = createIntegrationSink();
+
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    // First content clears Loading
+    const cleared = await coordinator.onModelContent('Hello');
+    assert.strictEqual(cleared, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+
+    // Now cancel mid-stream
+    coordinator.cancel();
+
+    // Verify: no Ending… was shown, no original text restoration
+    // Only Loading write + Loading deleteBack should have happened
+    const ops = runIndicator._operations();
+    const writes = ops.filter(o => o.type === 'write').map(o => o.text);
+    // Loading… was written; no restore of 'original' happened
+    assert.ok(writes.includes('Loading\u2026'));
+    assert.ok(!writes.includes('original'));
   });
 });

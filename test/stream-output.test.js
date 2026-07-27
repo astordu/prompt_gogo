@@ -155,3 +155,135 @@ describe('pipeToCursor — edge cases', () => {
     assert.strictEqual(sink.writes.join(''), 'a'.repeat(30) + 'b'.repeat(30));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: cancellation via AbortSignal
+// ---------------------------------------------------------------------------
+
+describe('pipeToCursor — cancellation', () => {
+  test('abort mid-stream stops output and discards buffered content', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+
+    // Generator that aborts after yielding some content, then tries to yield more
+    async function* abortableChunks() {
+      yield 'a'.repeat(30); // first batch: written immediately (meets threshold)
+      yield 'b'.repeat(10); // second batch: goes into buffer (below threshold)
+      controller.abort();   // abort now
+      yield 'c'.repeat(30); // this chunk should never be written
+    }
+
+    await pipeToCursor(abortableChunks(), sink, controller.signal);
+
+    // Only the first 30 chars should be written; 'b' batch is discarded
+    assert.strictEqual(sink.writes.length, 1);
+    assert.strictEqual(sink.writes[0], 'a'.repeat(30));
+  });
+
+  test('sink.close() still called on cancellation', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+
+    async function* abortableChunks() {
+      yield 'hello';
+      controller.abort();
+      yield 'world';
+    }
+
+    await pipeToCursor(abortableChunks(), sink, controller.signal);
+    assert.ok(sink.isClosed);
+  });
+
+  test('abort before any chunks produces no writes', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+
+    async function* abortableChunks() {
+      controller.abort();
+      yield 'hello';
+    }
+
+    await pipeToCursor(abortableChunks(), sink, controller.signal);
+    assert.strictEqual(sink.writes.length, 0);
+    assert.ok(sink.isClosed);
+  });
+
+  test('abort during time-window wait discards unflushed buffer', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+
+    // Generator that yields a small chunk (buffered, below threshold),
+    // then aborts before the time window can flush
+    async function* slowChunks() {
+      yield 'tiny'; // below threshold, goes into buffer
+      // Abort before the 200ms timer fires
+      controller.abort();
+      // This chunk arrives after abort — should be discarded
+      yield 'discarded';
+    }
+
+    await pipeToCursor(slowChunks(), sink, controller.signal);
+    // 'tiny' was in buffer but aborted before flush — nothing written
+    // OR it was already flushed — either way, 'discarded' must not appear
+    assert.ok(!sink.writes.join('').includes('discarded'));
+    assert.ok(sink.isClosed);
+  });
+
+  test('already-aborted signal produces no writes and closes sink', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const sink = createMemorySink();
+
+    await pipeToCursor(chunksFromArray(['hello', 'world']), sink, controller.signal);
+    assert.strictEqual(sink.writes.length, 0);
+    assert.ok(sink.isClosed);
+  });
+
+  test('normal behavior unchanged without signal', async () => {
+    const sink = createMemorySink();
+    const inputs = ['Hello', ' ', 'World', '!', ' This is a test.'];
+    await pipeToCursor(chunksFromArray(inputs), sink, null);
+    assert.strictEqual(sink.writes.join(''), inputs.join(''));
+  });
+
+  test('normal behavior unchanged with non-aborted signal', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+    const inputs = ['Hello', ' ', 'World', '!', ' This is a test.'];
+    await pipeToCursor(chunksFromArray(inputs), sink, controller.signal);
+    assert.strictEqual(sink.writes.join(''), inputs.join(''));
+    assert.strictEqual(controller.signal.aborted, false);
+  });
+
+  test('abort after all chunks processed does not affect output', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+    const inputs = ['a'.repeat(30), 'b'.repeat(30)];
+
+    async function* chunksThenAbort() {
+      for (const item of inputs) yield item;
+      controller.abort();
+    }
+
+    await pipeToCursor(chunksThenAbort(), sink, controller.signal);
+    assert.strictEqual(sink.writes.join(''), inputs.join(''));
+  });
+
+  test('abort preserves already-written content but discards buffer', async () => {
+    const controller = new AbortController();
+    const sink = createMemorySink();
+
+    async function* mixedChunks() {
+      yield 'a'.repeat(30);  // written (threshold met)
+      yield 'b'.repeat(30);  // written (threshold met)
+      yield 'c'.repeat(5);   // buffered (below threshold)
+      controller.abort();
+      yield 'd'.repeat(30);  // never written
+    }
+
+    await pipeToCursor(mixedChunks(), sink, controller.signal);
+    // 'a' batch and 'b' batch are written; 'c' is discarded from buffer
+    assert.strictEqual(sink.writes.length, 2);
+    assert.strictEqual(sink.writes.join(''), 'a'.repeat(30) + 'b'.repeat(30));
+  });
+});

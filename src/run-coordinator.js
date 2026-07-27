@@ -75,6 +75,8 @@ class RunCoordinator {
     this._loadingActive = false;
     /** @type {string|null} */
     this._loadingOriginalText = null;
+    /** @type {AbortController|null} */
+    this._abortController = null;
   }
 
   // ------------------------------------------------------------------
@@ -122,6 +124,16 @@ class RunCoordinator {
     return this._loadingActive;
   }
 
+  /**
+   * Returns the AbortSignal for the current Run, or null if no Run
+   * is active. The signal is aborted when cancel() is called, allowing
+   * HTTP requests and streaming pipelines to stop promptly.
+   * @returns {AbortSignal|null}
+   */
+  getAbortSignal() {
+    return this._abortController ? this._abortController.signal : null;
+  }
+
   // ------------------------------------------------------------------
   // Run lifecycle
   // ------------------------------------------------------------------
@@ -144,6 +156,7 @@ class RunCoordinator {
     this._active = true;
     this._cancelled = false;
     this._targetInvalid = false;
+    this._abortController = new AbortController();
 
     // Capture the Output Target identity at trigger time
     if (this._outputTarget) {
@@ -198,6 +211,9 @@ class RunCoordinator {
   cancel() {
     if (!this._active || this._cancelled) return;
     this._cancelled = true;
+    if (this._abortController) {
+      this._abortController.abort();
+    }
   }
 
   // ------------------------------------------------------------------
@@ -347,6 +363,7 @@ class RunCoordinator {
     this._targetInvalid = false;
     this._loadingActive = false;
     this._loadingOriginalText = null;
+    this._abortController = null;
   }
 
   // ------------------------------------------------------------------

@@ -341,8 +341,11 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
   console.log(`🚀 发送流式请求...`);
   console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
 
+  let firstContentHandled = false;
+
   try {
     const startTime = Date.now();
+    const abortSignal = runCoordinator.getAbortSignal();
 
     const response = await axios.post(requestConfig.url, {
       ...requestConfig.body,
@@ -354,7 +357,8 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
     }, {
       headers: requestConfig.headers,
       responseType: 'stream',
-      timeout: 60000
+      timeout: 60000,
+      signal: abortSignal || undefined
     });
 
     // Check if cancelled during the HTTP request
@@ -408,12 +412,21 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
     }
 
     const collected = [];
-    let firstContentHandled = false;
+    let responseDestroyed = false;
     async function* trackedChunks() {
       for await (const chunk of sseTextStream(response.data)) {
-        // If cancelled while Loading is still active, abort
-        if (runCoordinator.isCancelled() && runCoordinator.isShowingLoading()) {
-          await runCoordinator.abortLoading();
+        // Check for cancellation at every iteration
+        if (runCoordinator.isCancelled()) {
+          // Stop consuming the SSE stream
+          if (!responseDestroyed) {
+            responseDestroyed = true;
+            response.data.destroy();
+          }
+          // If still in Loading phase, abort and restore original text
+          if (runCoordinator.isShowingLoading()) {
+            await runCoordinator.abortLoading();
+          }
+          // Discard this chunk and stop
           return;
         }
 
@@ -429,6 +442,16 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
           }
           firstContentHandled = cleared;
         }
+
+        // Re-check cancellation after the async Loading transition
+        if (runCoordinator.isCancelled()) {
+          if (!responseDestroyed) {
+            responseDestroyed = true;
+            response.data.destroy();
+          }
+          return;
+        }
+
         collected.push(chunk);
         yield chunk;
       }
@@ -449,7 +472,23 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
       },
     };
 
-    await pipeToCursor(trackedChunks(), validatingSink);
+    await pipeToCursor(trackedChunks(), validatingSink, abortSignal);
+
+    // After streaming completes, check if the Run was cancelled
+    if (runCoordinator.isCancelled()) {
+      // Already-written content is preserved; just send cancel notification
+      // (not if it was cancelled during Loading — that was handled above)
+      if (firstContentHandled) {
+        showNotification('已取消', '运行任务已取消');
+      }
+      return;
+    }
+
+    // Check if target became invalid during streaming
+    if (runCoordinator.isTargetInvalid()) {
+      // Target invalid notification already sent by validateTarget
+      return;
+    }
 
     const fullText = collected.join('');
     const elapsed = Date.now() - startTime;
@@ -461,6 +500,16 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
     console.log('========================================\n');
 
   } catch (error) {
+    // Handle cancellation errors from axios (AbortSignal)
+    if (axios.isCancel && axios.isCancel(error)) {
+      if (runCoordinator.isShowingLoading()) {
+        await runCoordinator.abortLoading();
+      }
+      // Already-written content (if any) is preserved
+      showNotification('已取消', '运行任务已取消');
+      return;
+    }
+
     if (error.message === 'Output Target invalid') {
       // Target invalid notification already sent by validateTarget
       console.log('\n⚠️ Output Target 已失效，停止写入');
@@ -472,10 +521,18 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
     }
 
     // If we haven't received any model content yet, abort Loading
-    // and restore the original text
+    // and restore the original text.
+    // If partial content was already written, it is preserved —
+    // no Ending… or Error… inline text is inserted.
     if (runCoordinator.isShowingLoading()) {
       await runCoordinator.abortLoading();
     }
+
+    // Don't show error notification if cancelled (cancel path handles its own notification)
+    if (runCoordinator.isCancelled()) {
+      return;
+    }
+
     console.error('\n========================================');
     console.error('❌ API 调用失败');
     console.error('========================================');
