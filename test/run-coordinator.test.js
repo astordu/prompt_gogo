@@ -76,6 +76,10 @@ function createFakeNotifier() {
  * Creates a fake text reader that returns a configurable value.
  * Supports delayed reads to test cancellation during text reading.
  */
+/**
+ * Creates a fake text reader that returns a configurable value.
+ * Supports delayed reads to test cancellation during text reading.
+ */
 function createFakeTextReader(text, delay = 0) {
   let readCount = 0;
   return {
@@ -92,6 +96,32 @@ function createFakeTextReader(text, delay = 0) {
   };
 }
 
+/**
+ * Creates a fake Output Target that can be configured to become
+ * invalid at any point during a Run.
+ */
+function createFakeOutputTarget() {
+  let captured = false;
+  let valid = true;
+
+  return {
+    capture() {
+      captured = true;
+      valid = true;
+    },
+    isValid() {
+      return captured && valid;
+    },
+    // test helpers
+    _invalidate() {
+      valid = false;
+    },
+    _isCaptured() {
+      return captured;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helper to wire up a coordinator with all fakes.
 // ---------------------------------------------------------------------------
@@ -100,14 +130,16 @@ function makeCoordinator(opts = {}) {
   const registrar = opts.registrar || createFakeCancelRegistrar();
   const notifier = opts.notifier || createFakeNotifier();
   const reader = opts.reader || createFakeTextReader(opts.text !== undefined ? opts.text : 'selected text');
+  const outputTarget = opts.outputTarget || createFakeOutputTarget();
 
   const coordinator = new RunCoordinator({
     cancelRegistrar: registrar,
     onNotify: (title, body) => notifier.notify(title, body),
     readSelectedText: () => reader.read(),
+    outputTarget,
   });
 
-  return { coordinator, registrar, notifier, reader };
+  return { coordinator, registrar, notifier, reader, outputTarget };
 }
 
 // ---------------------------------------------------------------------------
@@ -501,5 +533,240 @@ describe('full lifecycle — integration', () => {
 
     coordinator.endRun();
     assert.strictEqual(coordinator.isActive(), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Output Target binding
+// ---------------------------------------------------------------------------
+
+describe('Output Target — capture and validation', () => {
+  test('beginRun captures the Output Target', () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    assert.ok(!outputTarget._isCaptured());
+    coordinator.beginRun();
+    assert.ok(outputTarget._isCaptured());
+  });
+
+  test('validateTarget returns true when target is still valid', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    assert.strictEqual(coordinator.validateTarget(), true);
+  });
+
+  test('validateTarget returns false when target became invalid', () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    outputTarget._invalidate();
+    assert.strictEqual(coordinator.validateTarget(), false);
+  });
+
+  test('validateTarget sends a notification when target becomes invalid', () => {
+    const { coordinator, notifier, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    notifier._clear();
+    outputTarget._invalidate();
+    coordinator.validateTarget();
+    assert.strictEqual(notifier._count(), 1);
+    assert.ok(notifier._all()[0].title.includes('失效'));
+  });
+
+  test('validateTarget is idempotent (only notifies once)', () => {
+    const { coordinator, notifier, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    notifier._clear();
+    outputTarget._invalidate();
+    coordinator.validateTarget();
+    coordinator.validateTarget();
+    assert.strictEqual(notifier._count(), 1);
+  });
+
+  test('validateTarget returns false when no Run is active', () => {
+    const { coordinator } = makeCoordinator();
+    assert.strictEqual(coordinator.validateTarget(), false);
+  });
+
+  test('isTargetInvalid is false initially and true after invalidation', () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    assert.strictEqual(coordinator.isTargetInvalid(), false);
+    outputTarget._invalidate();
+    coordinator.validateTarget();
+    assert.strictEqual(coordinator.isTargetInvalid(), true);
+  });
+
+  test('isViable returns true when active, not cancelled, target valid', () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    assert.strictEqual(coordinator.isViable(), true);
+  });
+
+  test('isViable returns false after target invalidation', () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    outputTarget._invalidate();
+    coordinator.validateTarget();
+    assert.strictEqual(coordinator.isViable(), false);
+  });
+
+  test('endRun resets targetInvalid state', () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    outputTarget._invalidate();
+    coordinator.validateTarget();
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isTargetInvalid(), false);
+  });
+});
+
+describe('Output Target — invalidation during text read', () => {
+  test('target invalid before readText returns null', async () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+    coordinator.beginRun();
+    outputTarget._invalidate();
+    coordinator.validateTarget();
+    const text = await coordinator.readText();
+    assert.strictEqual(text, null);
+  });
+
+  test('target invalid after async read completes returns null', async () => {
+    let resolveRead;
+    const pendingRead = new Promise(r => { resolveRead = r; });
+    const outputTarget = createFakeOutputTarget();
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: () => pendingRead,
+      outputTarget,
+    });
+
+    coordinator.beginRun();
+    const readPromise = coordinator.readText();
+
+    // Target becomes invalid while the read is pending
+    outputTarget._invalidate();
+
+    // Complete the read
+    resolveRead('some text');
+
+    const text = await readPromise;
+    assert.strictEqual(text, null);
+    assert.strictEqual(coordinator.isTargetInvalid(), true);
+  });
+
+  test('target invalid during readText sends notification', async () => {
+    let resolveRead;
+    const pendingRead = new Promise(r => { resolveRead = r; });
+    const notifier = createFakeNotifier();
+    const outputTarget = createFakeOutputTarget();
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: (t, b) => notifier.notify(t, b),
+      readSelectedText: () => pendingRead,
+      outputTarget,
+    });
+
+    coordinator.beginRun();
+    notifier._clear();
+    const readPromise = coordinator.readText();
+
+    outputTarget._invalidate();
+    resolveRead('text');
+
+    await readPromise;
+    assert.strictEqual(notifier._count(), 1);
+    assert.ok(notifier._all()[0].title.includes('失效'));
+  });
+
+  test('valid target during readText returns text normally', async () => {
+    const { coordinator } = makeCoordinator({ text: 'hello' });
+    coordinator.beginRun();
+    const text = await coordinator.readText();
+    assert.strictEqual(text, 'hello');
+    assert.strictEqual(coordinator.isTargetInvalid(), false);
+  });
+});
+
+describe('Output Target — no target configured (backward compatible)', () => {
+  test('works without outputTarget injection', () => {
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: async () => 'text',
+    });
+
+    assert.ok(coordinator.beginRun());
+    assert.strictEqual(coordinator.isActive(), true);
+    assert.strictEqual(coordinator.validateTarget(), true);
+    assert.strictEqual(coordinator.isViable(), true);
+    coordinator.endRun();
+  });
+
+  test('readText works without outputTarget', async () => {
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: async () => 'text',
+    });
+
+    coordinator.beginRun();
+    const text = await coordinator.readText();
+    assert.strictEqual(text, 'text');
+    coordinator.endRun();
+  });
+});
+
+describe('Output Target — full lifecycle with invalidation', () => {
+  test('begin → target invalidates → validateTarget fails → end', async () => {
+    const { coordinator, notifier, outputTarget, registrar } = makeCoordinator({ text: 'test' });
+
+    assert.ok(coordinator.beginRun());
+    assert.ok(outputTarget._isCaptured());
+    assert.strictEqual(coordinator.isViable(), true);
+
+    // Simulate app focus change
+    outputTarget._invalidate();
+
+    assert.strictEqual(coordinator.validateTarget(), false);
+    assert.strictEqual(coordinator.isViable(), false);
+    assert.strictEqual(coordinator.isTargetInvalid(), true);
+
+    // Further operations should detect invalid state
+    const text = await coordinator.readText();
+    assert.strictEqual(text, null);
+
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isActive(), false);
+    assert.strictEqual(coordinator.isTargetInvalid(), false);
+    assert.ok(!registrar._has(CANCEL_ACCELERATOR));
+  });
+
+  test('target stays valid throughout a normal Run', async () => {
+    const { coordinator, outputTarget } = makeCoordinator({ text: 'test' });
+
+    coordinator.beginRun();
+    assert.strictEqual(coordinator.validateTarget(), true);
+
+    const text = await coordinator.readText();
+    assert.strictEqual(text, 'test');
+    assert.strictEqual(coordinator.validateTarget(), true);
+    assert.strictEqual(coordinator.isViable(), true);
+
+    coordinator.endRun();
+  });
+
+  test('capture is fresh on each beginRun', () => {
+    const { coordinator, outputTarget } = makeCoordinator();
+
+    // First Run
+    coordinator.beginRun();
+    assert.ok(outputTarget._isCaptured());
+    coordinator.endRun();
+
+    // Second Run — capture should work again
+    coordinator.beginRun();
+    assert.strictEqual(coordinator.isTargetInvalid(), false);
+    assert.strictEqual(coordinator.validateTarget(), true);
+    coordinator.endRun();
   });
 });

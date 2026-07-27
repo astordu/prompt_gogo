@@ -8,6 +8,7 @@ const { replaceVariables } = require('./template');
 const { buildRequestConfig, validateProviderConfig, migrateToProviders } = require('./provider');
 const { ShortcutService, createElectronRegistrar, createElectronStore } = require('./shortcut-service');
 const { RunCoordinator } = require('./run-coordinator');
+const { createOutputTarget } = require('./output-target');
 
 // Initialize config store
 const store = new Store({
@@ -179,8 +180,12 @@ async function handleShortcutTrigger(shortcutConfig) {
     const selectedText = await runCoordinator.readText();
 
     if (selectedText === null) {
-      // Cancelled during text read
-      showNotification('已取消', '运行任务已取消');
+      // Cancelled or target invalid during text read
+      if (runCoordinator.isTargetInvalid()) {
+        // Target invalid notification already sent by validateTarget
+      } else {
+        showNotification('已取消', '运行任务已取消');
+      }
       return;
     }
 
@@ -194,8 +199,11 @@ async function handleShortcutTrigger(shortcutConfig) {
 
     const prompt = replaceVariables(shortcutConfig.template, { select_content: selectedText });
 
-    if (runCoordinator.isCancelled()) {
-      showNotification('已取消', '运行任务已取消');
+    if (!runCoordinator.isViable()) {
+      if (runCoordinator.isCancelled()) {
+        showNotification('已取消', '运行任务已取消');
+      }
+      // Target invalid notification already sent by validateTarget
       return;
     }
 
@@ -321,8 +329,6 @@ async function processWithAI(prompt, shortcutConfig) {
   console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
 
   try {
-    showNotification('处理中...', `正在运行: ${actionName}`);
-
     const startTime = Date.now();
 
     const response = await axios.post(requestConfig.url, {
@@ -385,19 +391,38 @@ async function processWithAI(prompt, shortcutConfig) {
       }
     }
 
-    await pipeToCursor(trackedChunks(), createClipboardSink());
+    // Wrap the clipboard sink with target validation: each write
+    // checks that the Output Target is still valid before pasting.
+    const baseSink = createClipboardSink();
+    const validatingSink = {
+      async write(text) {
+        if (!runCoordinator.validateTarget()) {
+          throw new Error('Output Target invalid');
+        }
+        await baseSink.write(text);
+      },
+      async close() {
+        await baseSink.close();
+      },
+    };
+
+    await pipeToCursor(trackedChunks(), validatingSink);
 
     const fullText = collected.join('');
     const elapsed = Date.now() - startTime;
     console.log(`\n✅ 流式响应完成 (总耗时: ${elapsed}ms)`);
     console.log(`📄 总共输出: ${fullText.length} 字符`);
 
-    showNotification('成功', '内容已流式输出完成!');
     console.log('\n========================================');
     console.log('🎉 处理完成!');
     console.log('========================================\n');
 
   } catch (error) {
+    if (error.message === 'Output Target invalid') {
+      // Target invalid notification already sent by validateTarget
+      console.log('\n⚠️ Output Target 已失效，停止写入');
+      return;
+    }
     console.error('\n========================================');
     console.error('❌ API 调用失败');
     console.error('========================================');
@@ -578,6 +603,7 @@ app.whenReady().then(() => {
     },
     onNotify: (title, body) => showNotification(title, body),
     readSelectedText: () => readSelectedText(),
+    outputTarget: createOutputTarget(),
   });
 
   // Create the shortcut management service with injectable dependencies
