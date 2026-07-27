@@ -1,6 +1,8 @@
 node_modules/
 dist/
-build/
+build/*
+!build/icon.png
+!build/generate_icon.py
 .DS_Store
 *.log
 .vscode/
