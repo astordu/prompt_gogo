@@ -2,7 +2,7 @@
 
 const { describe, test } = require('node:test');
 const assert = require('node:assert');
-const { pipeToCursor } = require('../src/stream-output');
+const { pipeToCursor } = require('../../src/run/stream-output');
 
 function createMemorySink() {
   const writes = [];

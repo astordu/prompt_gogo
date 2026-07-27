@@ -26,7 +26,7 @@ function createFakeClipboard() {
 
 describe('clipboard-sink — conditional restore', () => {
   test('restores original clipboard on close when user did not copy', async () => {
-    const { createClipboardSink } = require('../src/clipboard-sink');
+    const { createClipboardSink } = require('../../src/run/clipboard-sink');
     const clipboard = createFakeClipboard();
     clipboard._set('user-original');
 
@@ -41,7 +41,7 @@ describe('clipboard-sink — conditional restore', () => {
   });
 
   test('preserves user\'s new clipboard content when user copied during Run', async () => {
-    const { createClipboardSink } = require('../src/clipboard-sink');
+    const { createClipboardSink } = require('../../src/run/clipboard-sink');
     const clipboard = createFakeClipboard();
     clipboard._set('user-original');
 
@@ -59,7 +59,7 @@ describe('clipboard-sink — conditional restore', () => {
   });
 
   test('does not restore if clipboard differs from last written', async () => {
-    const { createClipboardSink } = require('../src/clipboard-sink');
+    const { createClipboardSink } = require('../../src/run/clipboard-sink');
     const clipboard = createFakeClipboard();
     clipboard._set('original');
 
@@ -76,7 +76,7 @@ describe('clipboard-sink — conditional restore', () => {
   });
 
   test('close with no writes is a no-op', async () => {
-    const { createClipboardSink } = require('../src/clipboard-sink');
+    const { createClipboardSink } = require('../../src/run/clipboard-sink');
     const clipboard = createFakeClipboard();
     clipboard._set('user-data');
 
@@ -88,7 +88,7 @@ describe('clipboard-sink — conditional restore', () => {
   });
 
   test('multiple writes track the last written value for conditional restore', async () => {
-    const { createClipboardSink } = require('../src/clipboard-sink');
+    const { createClipboardSink } = require('../../src/run/clipboard-sink');
     const clipboard = createFakeClipboard();
     clipboard._set('original');
 
@@ -105,7 +105,7 @@ describe('clipboard-sink — conditional restore', () => {
   });
 
   test('restore happens even when last written equals original (edge case)', async () => {
-    const { createClipboardSink } = require('../src/clipboard-sink');
+    const { createClipboardSink } = require('../../src/run/clipboard-sink');
     const clipboard = createFakeClipboard();
     clipboard._set('same-value');
 

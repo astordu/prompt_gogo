@@ -2,8 +2,8 @@
 
 const { describe, test, beforeEach } = require('node:test');
 const assert = require('node:assert');
-const { RunCoordinator, CANCEL_ACCELERATOR, ENDING_TEXT, ENDING_HOLD_MS } = require('../src/run-coordinator');
-const { pipeToCursor } = require('../src/stream-output');
+const { RunCoordinator, CANCEL_ACCELERATOR, ENDING_TEXT, ENDING_HOLD_MS } = require('../../src/run/run-coordinator');
+const { pipeToCursor } = require('../../src/run/stream-output');
 
 // ---------------------------------------------------------------------------
 // Test doubles

@@ -3,7 +3,7 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert');
 
-const { createRunIndicatorSink, buildSelectAndDeleteArgs } = require('../src/run-indicator');
+const { createRunIndicatorSink, buildSelectAndDeleteArgs } = require('../../src/run/run-indicator');
 
 /**
  * Simulates a text field that supports paste, backspace (single char),

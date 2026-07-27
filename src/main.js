@@ -2,14 +2,14 @@ const { app, BrowserWindow, globalShortcut, clipboard, ipcMain, Tray, Menu } = r
 const path = require('path');
 const Store = require('electron-store');
 const axios = require('axios');
-const { pipeToCursor } = require('./stream-output');
-const { createClipboardSink } = require('./clipboard-sink');
-const { replaceVariables } = require('./template');
 const { buildRequestConfig, validateProviderConfig, migrateToProviders } = require('./provider');
 const { ShortcutService, createElectronRegistrar, createElectronStore } = require('./shortcut-service');
-const { RunCoordinator } = require('./run-coordinator');
-const { createOutputTarget } = require('./output-target');
-const { createRunIndicatorSink } = require('./run-indicator');
+const { RunCoordinator } = require('./run/run-coordinator');
+const { createOutputTarget } = require('./run/output-target');
+const { createRunIndicatorSink } = require('./run/run-indicator');
+const { createTextReader } = require('./run/text-reader');
+const { sseTextStream } = require('./run/sse-stream');
+const { RunExecutor } = require('./run/run-executor');
 
 // Initialize config store
 const store = new Store({
@@ -38,8 +38,8 @@ let tray = null;
 // Shortcut management service (created in app.whenReady to ensure showNotification is available)
 let shortcutService = null;
 
-// Run coordinator (created in app.whenReady alongside shortcutService)
-let runCoordinator = null;
+// Run executor (created in app.whenReady alongside shortcutService)
+let runExecutor = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -158,195 +158,24 @@ function registerShortcuts() {
   console.log('💡 日志将显示在下方...\n');
 }
 
-async function handleShortcutTrigger(shortcutConfig) {
-  console.log('\n========================================');
-  console.log(`🔥 快捷键触发: ${shortcutConfig.name}`);
-  console.log(`   快捷键: ${shortcutConfig.shortcut}`);
-  console.log('========================================');
+function showNotification(title, body) {
+  const { Notification } = require('electron');
 
-  // Check if running on macOS
-  if (process.platform !== 'darwin') {
-    console.error('❌ 错误: 不是 macOS 系统');
-    showNotification('平台错误', '此功能仅支持 macOS 系统');
-    return;
-  }
-
-  // Begin a single Run — rejected if one is already active
-  if (!runCoordinator.beginRun()) {
-    console.log('⏭️ 已有活动 Run，跳过本次触发');
-    return;
-  }
-
-  try {
-    const selectedText = await runCoordinator.readText();
-
-    if (selectedText === null) {
-      // Cancelled or target invalid during text read
-      if (runCoordinator.isTargetInvalid()) {
-        // Target invalid notification already sent by validateTarget
-      } else {
-        showNotification('已取消', '运行任务已取消');
-      }
-      return;
-    }
-
-    if (!selectedText || selectedText.trim() === '') {
-      console.log('\n❌ 未能获取选中文本');
-      showNotification('未能获取文本', '请确保文本已选中\n或先 Cmd+C 复制后再试');
-      return;
-    }
-
-    console.log(`✅ 获取文本 (${selectedText.length} 字符)`);
-
-    const prompt = replaceVariables(shortcutConfig.template, { select_content: selectedText });
-
-    if (!runCoordinator.isViable()) {
-      if (runCoordinator.isCancelled()) {
-        showNotification('已取消', '运行任务已取消');
-      }
-      // Target invalid notification already sent by validateTarget
-      return;
-    }
-
-    await processWithAI(prompt, shortcutConfig, selectedText);
-  } catch (error) {
-    console.error('\n❌ 处理失败:', error.message);
-  } finally {
-    runCoordinator.endRun();
+  if (Notification.isSupported()) {
+    new Notification({
+      title,
+      body
+    }).show();
   }
 }
 
 /**
- * Read the currently selected text using Accessibility API, falling
- * back to the clipboard method if needed.
- * @returns {Promise<string>}
+ * Production model-request adapter: sends a streaming chat completion
+ * request via axios and returns an async iterable of content chunks
+ * parsed from the SSE response.
  */
-async function readSelectedText() {
-  const { execSync } = require('child_process');
-  const fs = require('fs');
-  const os = require('os');
-
-  // Method 1: Accessibility API
-  try {
-    const scriptPath = path.join(os.tmpdir(), 'get-selected-text.scpt');
-
-    const appleScriptContent = `tell application "System Events"
-  set frontApp to first application process whose frontmost is true
-  tell frontApp
-    try
-      if exists (attribute "AXFocusedUIElement") then
-        set focusedElement to value of attribute "AXFocusedUIElement"
-        if exists (attribute "AXSelectedText" of focusedElement) then
-          return value of attribute "AXSelectedText" of focusedElement
-        else
-          return "ERROR:No AXSelectedText attribute"
-        end if
-      else
-        return "ERROR:No focused element"
-      end if
-    on error errMsg
-      return "ERROR:" & errMsg
-    end try
-  end tell
-end tell`;
-
-    fs.writeFileSync(scriptPath, appleScriptContent, 'utf8');
-
-    const result = execSync(`osascript "${scriptPath}"`, {
-      encoding: 'utf8',
-      timeout: 2000
-    }).trim();
-
-    try {
-      fs.unlinkSync(scriptPath);
-    } catch {
-      // ignore
-    }
-
-    if (result && !result.startsWith('ERROR:') && result.trim() !== '') {
-      return result;
-    }
-  } catch {
-    // fall through to clipboard
-  }
-
-  // Method 2: Clipboard fallback
-  return await fallbackToClipboard();
-}
-
-// 回退方法：使用剪贴板方式获取文本
-async function fallbackToClipboard() {
-  console.log('\n📋 使用剪贴板回退方案...');
-  const { execSync } = require('child_process');
-
-  try {
-    // 模拟 Cmd+C
-    console.log('⌨️ 发送 Cmd+C 命令...');
-    execSync('osascript -e \'tell application "System Events" to keystroke "c" using command down\'');
-
-    // 等待剪贴板更新
-    console.log('⏱️ 等待 500ms...');
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const selectedText = clipboard.readText();
-    console.log(`📝 剪贴板内容: "${selectedText.substring(0, 50)}${selectedText.length > 50 ? '...' : ''}"`);
-
-    if (selectedText && selectedText.trim() !== '') {
-      console.log('✅ 剪贴板方法成功');
-      return selectedText;
-    } else {
-      console.log('⚠️ 剪贴板方法也失败了');
-      return '';
-    }
-  } catch (error) {
-    console.error(`❌ 剪贴板方法异常: ${error.message}`);
-    return '';
-  }
-}
-
-async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
-  const provider = findProvider(shortcutConfig.providerId);
-  const actionName = shortcutConfig.name;
-
-  if (!provider) {
-    console.error('❌ 未找到 Provider（请先在设置中配置模型提供方）');
-    showNotification('Provider 缺失', `快捷键「${actionName}」未绑定模型提供方，请在设置中配置`);
-    showWindow();
-    return;
-  }
-
-  const validation = validateProviderConfig(provider);
-  if (!validation.valid) {
-    console.error('❌ Provider 配置不完整:', validation.errors.join(', '));
-    showNotification('Provider 配置不完整', validation.errors.join('\n'));
-    showWindow();
-    return;
-  }
-
-  const requestConfig = buildRequestConfig(provider);
-
-  // Show Loading indicator before sending the request.
-  // This replaces the original selected text with the Run Indicator.
-  const loadingShown = await runCoordinator.showLoading(originalSelectedText || '');
-  if (!loadingShown) {
-    if (runCoordinator.isCancelled()) {
-      showNotification('已取消', '运行任务已取消');
-      return;
-    }
-    // Target invalid notification already sent by validateTarget
-    return;
-  }
-
-  console.log(`🔑 Provider: ${provider.name} (${provider.type})`);
-  console.log(`🚀 发送流式请求...`);
-  console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
-
-  let firstContentHandled = false;
-
-  try {
-    const startTime = Date.now();
-    const abortSignal = runCoordinator.getAbortSignal();
-
+function createModelRequestAdapter() {
+  return async function sendModelRequest(requestConfig, prompt, signal) {
     const response = await axios.post(requestConfig.url, {
       ...requestConfig.body,
       messages: [
@@ -358,243 +187,11 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
       headers: requestConfig.headers,
       responseType: 'stream',
       timeout: 60000,
-      signal: abortSignal || undefined
+      signal: signal || undefined
     });
 
-    // Check if cancelled during the HTTP request
-    if (runCoordinator.isCancelled()) {
-      if (runCoordinator.isShowingLoading()) {
-        await runCoordinator.abortLoading();
-      }
-      showNotification('已取消', '运行任务已取消');
-      // Destroy the response stream to stop consuming
-      response.data.destroy();
-      return;
-    }
-
-    console.log('✅ 开始接收流式响应...');
-    console.log('⌨️ 开始流式输出到光标位置...');
-
-    // TODO: 候选项④落地后删除
-    async function* sseTextStream(responseStream) {
-      let leftover = '';
-      for await (const chunk of responseStream) {
-        const lines = (leftover + chunk.toString()).split('\n');
-        leftover = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') return;
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) yield content;
-          } catch (e) {
-            // 忽略解析错误
-          }
-        }
-      }
-      if (leftover) {
-        const line = leftover;
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data !== '[DONE]') {
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) yield content;
-            } catch (e) {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-    }
-
-    const collected = [];
-    let responseDestroyed = false;
-    async function* trackedChunks() {
-      for await (const chunk of sseTextStream(response.data)) {
-        // Check for cancellation at every iteration
-        if (runCoordinator.isCancelled()) {
-          // Stop consuming the SSE stream
-          if (!responseDestroyed) {
-            responseDestroyed = true;
-            response.data.destroy();
-          }
-          // If still in Loading phase, abort and restore original text
-          if (runCoordinator.isShowingLoading()) {
-            await runCoordinator.abortLoading();
-          }
-          // Discard this chunk and stop
-          return;
-        }
-
-        // Handle the Loading indicator transition on first non-empty content
-        if (!firstContentHandled && chunk) {
-          const cleared = await runCoordinator.onModelContent(chunk);
-          if (!cleared) {
-            // Loading was not cleared — either cancelled or target invalid
-            if (runCoordinator.isCancelled()) {
-              await runCoordinator.abortLoading();
-            }
-            return;
-          }
-          firstContentHandled = cleared;
-        }
-
-        // Re-check cancellation after the async Loading transition
-        if (runCoordinator.isCancelled()) {
-          if (!responseDestroyed) {
-            responseDestroyed = true;
-            response.data.destroy();
-          }
-          return;
-        }
-
-        collected.push(chunk);
-        yield chunk;
-      }
-    }
-
-    // Wrap the clipboard sink with target validation: each write
-    // checks that the Output Target is still valid before pasting.
-    const baseSink = createClipboardSink();
-    const validatingSink = {
-      async write(text) {
-        if (!runCoordinator.validateTarget()) {
-          throw new Error('Output Target invalid');
-        }
-        await baseSink.write(text);
-      },
-      async close() {
-        await baseSink.close();
-      },
-    };
-
-    await pipeToCursor(trackedChunks(), validatingSink, abortSignal);
-
-    // After streaming completes, check if the Run was cancelled
-    if (runCoordinator.isCancelled()) {
-      // Already-written content is preserved; just send cancel notification
-      // (not if it was cancelled during Loading — that was handled above)
-      if (firstContentHandled) {
-        showNotification('已取消', '运行任务已取消');
-      }
-      return;
-    }
-
-    // Check if target became invalid during streaming
-    if (runCoordinator.isTargetInvalid()) {
-      // Target invalid notification already sent by validateTarget
-      return;
-    }
-
-    // Normal completion: if we received non-empty model content,
-    // show Ending indicator for 500ms as a brief completion indicator.
-    if (runCoordinator.hasModelContent()) {
-      const endingResult = await runCoordinator.showEnding();
-      // showEnding handles cancel during the hold period internally:
-      // if cancelled during Ending, it removes the indicator and
-      // treats the Run as successful (no cancel notification).
-      if (!endingResult && runCoordinator.isTargetInvalid()) {
-        // Target became invalid during Ending — notification already sent
-        return;
-      }
-      // If endingResult is false due to cancellation during Ending,
-      // the Run completed successfully — fall through to success.
-    } else {
-      // No model content received — treat as failure
-      if (runCoordinator.isShowingLoading()) {
-        await runCoordinator.abortLoading();
-      }
-      showNotification('错误', '未收到任何模型内容');
-      return;
-    }
-
-    const fullText = collected.join('');
-    const elapsed = Date.now() - startTime;
-    console.log(`\n✅ 流式响应完成 (总耗时: ${elapsed}ms)`);
-    console.log(`📄 总共输出: ${fullText.length} 字符`);
-
-    console.log('\n========================================');
-    console.log('🎉 处理完成!');
-    console.log('========================================\n');
-
-  } catch (error) {
-    // Handle cancellation errors from axios (AbortSignal)
-    if (axios.isCancel && axios.isCancel(error)) {
-      if (runCoordinator.isShowingLoading()) {
-        await runCoordinator.abortLoading();
-      }
-      // Already-written content (if any) is preserved
-      showNotification('已取消', '运行任务已取消');
-      return;
-    }
-
-    if (error.message === 'Output Target invalid') {
-      // Target invalid notification already sent by validateTarget
-      console.log('\n⚠️ Output Target 已失效，停止写入');
-      // If Loading is still active, try to abort (may fail if target invalid)
-      if (runCoordinator.isShowingLoading()) {
-        await runCoordinator.abortLoading();
-      }
-      return;
-    }
-
-    // If we haven't received any model content yet, abort Loading
-    // and restore the original text.
-    // If partial content was already written, it is preserved —
-    // no Ending or Error… inline text is inserted.
-    if (runCoordinator.isShowingLoading()) {
-      await runCoordinator.abortLoading();
-    }
-
-    // Don't show error notification if cancelled (cancel path handles its own notification)
-    if (runCoordinator.isCancelled()) {
-      return;
-    }
-
-    console.error('\n========================================');
-    console.error('❌ API 调用失败');
-    console.error('========================================');
-    console.error('错误详情:', error.response?.data || error.message);
-
-    let errorMessage = '处理文本失败';
-    if (error.response) {
-      console.error(`HTTP 状态码: ${error.response.status}`);
-      if (error.response.status === 401) {
-        errorMessage = 'API Key 无效，请检查您的配置';
-        console.error('原因: API Key 无效或已过期');
-      } else if (error.response.status === 429) {
-        errorMessage = 'API 请求次数超限，请稍后重试';
-        console.error('原因: 超过 API 调用频率限制');
-      } else if (error.response.status >= 500) {
-        errorMessage = 'API 服务暂时不可用，请稍后重试';
-        console.error('原因: 服务器错误');
-      }
-    } else if (error.code === 'ECONNABORTED') {
-      errorMessage = '请求超时，请检查网络连接';
-      console.error('原因: 请求超过 30 秒超时');
-    } else if (error.message) {
-      errorMessage = `错误: ${error.message}`;
-      console.error('原因:', error.message);
-    }
-
-    showNotification('错误', errorMessage);
-    console.error('========================================\n');
-  }
-}
-
-function showNotification(title, body) {
-  const { Notification } = require('electron');
-
-  if (Notification.isSupported()) {
-    new Notification({
-      title,
-      body
-    }).show();
-  }
+    return sseTextStream(response.data);
+  };
 }
 
 // IPC Handlers
@@ -723,8 +320,11 @@ app.whenReady().then(() => {
   migrateTemplates();
   migrateProviders();
 
+  // Create the text reader for macOS selected-text access
+  const textReader = createTextReader({ clipboard });
+
   // Create the run coordinator with globalShortcut as the cancel registrar
-  runCoordinator = new RunCoordinator({
+  const runCoordinator = new RunCoordinator({
     cancelRegistrar: {
       register(accelerator, callback) {
         return globalShortcut.register(accelerator, callback);
@@ -734,9 +334,19 @@ app.whenReady().then(() => {
       },
     },
     onNotify: (title, body) => showNotification(title, body),
-    readSelectedText: () => readSelectedText(),
+    readSelectedText: () => textReader.readSelectedText(),
     outputTarget: createOutputTarget(),
     runIndicator: createRunIndicatorSink({ clipboard }),
+  });
+
+  // Create the run executor with all system dependencies injected
+  runExecutor = new RunExecutor({
+    coordinator: runCoordinator,
+    readSelectedText: () => textReader.readSelectedText(),
+    findProvider,
+    sendModelRequest: createModelRequestAdapter(),
+    onNotify: (title, body) => showNotification(title, body),
+    onShowWindow: () => showWindow(),
   });
 
   // Create the shortcut management service with injectable dependencies
@@ -744,7 +354,7 @@ app.whenReady().then(() => {
     registrar: createElectronRegistrar(globalShortcut),
     store: createElectronStore(store),
     onTrigger: (shortcutConfig) => {
-      handleShortcutTrigger(shortcutConfig);
+      runExecutor.execute(shortcutConfig);
     },
     onNotify: (title, body) => {
       // Delay notification to avoid race with startup
