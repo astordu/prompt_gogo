@@ -1,5 +1,4 @@
 // Global state
-let currentEditingId = null;
 let shortcuts = [];
 let providers = [];
 let currentEditingProviderId = null;
@@ -27,12 +26,6 @@ const templateError = document.getElementById('template-error');
 const shortcutProviderSelect = document.getElementById('shortcut-provider');
 const shortcutProviderEmpty = document.getElementById('shortcut-provider-empty');
 
-// --- Shortcut availability check state ---
-// Tracks the latest check request so stale async results don't overwrite newer ones.
-let shortcutCheckToken = 0;
-// Cached result of the latest availability check for the current draft accelerator.
-let lastAvailabilityResult = null;
-
 const MODIFIER_NAMES = {
   'Control': { symbol: '⌃', label: 'Control' },
   'Command': { symbol: '⌘', label: 'Command' },
@@ -52,17 +45,160 @@ function formatAcceleratorForDisplay(accelerator) {
   }).join(' ');
 }
 
-function isModifierOnly(part) {
-  return ['Control', 'Command', 'CommandOrControl', 'Alt', 'Shift'].includes(part);
+// ---------------------------------------------------------------------------
+// Shortcut Draft — page adapter over the workflow module
+// ---------------------------------------------------------------------------
+
+/**
+ * Production adapter that bridges ShortcutDraft to Electron IPC.
+ * Each method delegates to the existing main-process ShortcutService.
+ */
+const draftAdapter = {
+  checkAvailability(accelerator, excludeId) {
+    return window.electronAPI.checkShortcutAvailability(accelerator, excludeId);
+  },
+  recommendShortcut(accelerator, excludeId, shortcutName) {
+    return window.electronAPI.recommendShortcut(accelerator, excludeId, shortcutName);
+  },
+  saveShortcut(shortcut) {
+    return window.electronAPI.saveShortcut(shortcut);
+  },
+  getConfig() {
+    return window.electronAPI.getConfig();
+  },
+};
+
+const draft = new shortcutDraftModule.ShortcutDraft(draftAdapter);
+
+/**
+ * Map a semantic snapshot from the workflow module to DOM.
+ * This is the only place that translates status → Chinese copy / styles.
+ */
+function renderDraftSnapshot(snapshot) {
+  // Update input fields from the authoritative draft state
+  if (promptNameInput.value !== snapshot.name) {
+    promptNameInput.value = snapshot.name;
+  }
+  if (keyboardShortcutInput.value !== snapshot.accelerator) {
+    keyboardShortcutInput.value = snapshot.accelerator;
+  }
+  if (shortcutProviderSelect.value !== (snapshot.providerId || '')) {
+    shortcutProviderSelect.value = snapshot.providerId || '';
+  }
+
+  // Template is managed by the chip editor; sync only on session open
+  // (handled separately in openAdd/openEdit).
+
+  // --- Availability status ---
+  const status = snapshot.status;
+  const conflictWith = snapshot.conflictWith;
+
+  switch (status) {
+    case 'idle':
+      hideAvailabilityStatus();
+      hideRecommendation();
+      templateError.classList.add('hidden');
+      shortcutProviderEmpty.classList.add('hidden');
+      break;
+    case 'checking':
+      showAvailabilityStatus('checking', '正在检测…');
+      hideRecommendation();
+      break;
+    case 'invalid':
+      showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键（Control / Option / Shift / Command）加一个普通键。');
+      hideRecommendation();
+      break;
+    case 'available':
+      showAvailabilityStatus('available', '✓ 当前可用');
+      hideRecommendation();
+      break;
+    case 'internal-conflict':
+      showAvailabilityStatus('internal-conflict', `✗ 与已有快捷键「${conflictWith || ''}」重复`);
+      break;
+    case 'external-conflict':
+      showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用');
+      break;
+    case 'unavailable':
+      showAvailabilityStatus('unavailable', '暂时无法检测，请点击重新检测');
+      hideRecommendation();
+      break;
+    case 'missing-name':
+      hideAvailabilityStatus();
+      hideRecommendation();
+      templateError.classList.add('hidden');
+      shortcutProviderEmpty.classList.add('hidden');
+      promptNameInput.focus();
+      break;
+    case 'missing-shortcut':
+      hideAvailabilityStatus();
+      hideRecommendation();
+      templateError.classList.add('hidden');
+      shortcutProviderEmpty.classList.add('hidden');
+      keyboardShortcutInput.focus();
+      break;
+    case 'invalid-template':
+      hideAvailabilityStatus();
+      hideRecommendation();
+      templateError.classList.remove('hidden');
+      shortcutProviderEmpty.classList.add('hidden');
+      break;
+    case 'missing-provider':
+      hideAvailabilityStatus();
+      hideRecommendation();
+      templateError.classList.add('hidden');
+      shortcutProviderEmpty.classList.remove('hidden');
+      break;
+    case 'saving':
+      showAvailabilityStatus('checking', '正在保存…');
+      hideRecommendation();
+      savePromptBtn.disabled = true;
+      break;
+    case 'save-failure':
+      savePromptBtn.disabled = false;
+      showAvailabilityStatus('external-conflict', '✗ 注册失败，该组合可能已被占用');
+      break;
+    case 'saved':
+      savePromptBtn.disabled = false;
+      // The authoritative snapshot is used to re-render the list
+      if (snapshot.savedSnapshot) {
+        shortcuts = snapshot.savedSnapshot.shortcuts || [];
+        providers = snapshot.savedSnapshot.providers || providers;
+        renderShortcuts();
+      }
+      closeModal();
+      return;
+  }
+
+  // --- Recommendation ---
+  if (status !== 'saving' && status !== 'saved') {
+    savePromptBtn.disabled = false;
+  }
+
+  if (snapshot.recommendation) {
+    const display = formatAcceleratorForDisplay(snapshot.recommendation);
+    recommendationText.innerHTML = '推荐使用 ' + display;
+    shortcutRecommendation.classList.remove('hidden');
+    noRecommendation.classList.add('hidden');
+  } else if (status === 'internal-conflict' || status === 'external-conflict') {
+    // Recommendation may still be loading; hide the suggestion only if
+    // the module has cleared it (null) after the conflict was set.
+    // We check via the snapshot — if recommendation is null after conflict
+    // settled, show "no recommendation" only if the status is a conflict.
+    // But the module emits immediately on conflict with null recommendation,
+    // then emits again when the recommendation arrives. To avoid flicker,
+    // we only show "no recommendation" if we're confident the async rec
+    // has completed. Since the module doesn't expose a "rec-loading" flag,
+    // we leave the recommendation area hidden during conflict until a rec
+    // arrives or the user moves on.
+    hideRecommendation();
+  } else {
+    hideRecommendation();
+  }
 }
 
-function isValidShortcutFormat(accelerator) {
-  if (!accelerator) return false;
-  const parts = accelerator.split('+');
-  const modifiers = parts.filter(isModifierOnly);
-  const nonModifiers = parts.filter(p => !isModifierOnly(p));
-  return modifiers.length >= 2 && nonModifiers.length >= 1;
-}
+draft.subscribe(renderDraftSnapshot);
+
+// --- Availability status helpers (DOM only) ---
 
 function showAvailabilityStatus(type, message) {
   shortcutAvailabilityStatus.classList.remove('hidden', 'text-success', 'text-danger', 'text-text-secondary-light', 'dark:text-text-secondary-dark');
@@ -90,135 +226,26 @@ function hideAvailabilityStatus() {
   shortcutAvailabilityStatus.textContent = '';
 }
 
-async function checkShortcutAvailability(accelerator, excludeId) {
-  const token = ++shortcutCheckToken;
-
-  if (!accelerator || !accelerator.trim()) {
-    hideAvailabilityStatus();
-    hideRecommendation();
-    lastAvailabilityResult = null;
-    return null;
-  }
-
-  if (!isValidShortcutFormat(accelerator)) {
-    showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键（Control / Option / Shift / Command）加一个普通键。');
-    hideRecommendation();
-    lastAvailabilityResult = { status: 'invalid' };
-    return { status: 'invalid' };
-  }
-
-  showAvailabilityStatus('checking', '正在检测…');
-
-  let result;
-  try {
-    result = await window.electronAPI.checkShortcutAvailability(accelerator, excludeId);
-  } catch {
-    result = { status: 'unavailable' };
-  }
-
-  // Stale check — a newer recording has started, discard this result
-  if (token !== shortcutCheckToken) return null;
-
-  lastAvailabilityResult = result;
-
-  switch (result.status) {
-    case 'available':
-      showAvailabilityStatus('available', '✓ 当前可用');
-      hideRecommendation();
-      break;
-    case 'internal-conflict':
-      showAvailabilityStatus('internal-conflict', `✗ 与已有快捷键「${result.conflictWith}」重复`);
-      fetchRecommendation(accelerator, excludeId);
-      break;
-    case 'external-conflict':
-      showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用');
-      fetchRecommendation(accelerator, excludeId);
-      break;
-    case 'unavailable':
-      showAvailabilityStatus('unavailable', '暂时无法检测，请点击重新检测');
-      hideRecommendation();
-      break;
-    default:
-      showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
-      hideRecommendation();
-      break;
-  }
-
-  return result;
-}
-
-// --- Shortcut Recommendation ---
-
 function hideRecommendation() {
   shortcutRecommendation.classList.add('hidden');
   noRecommendation.classList.add('hidden');
   recommendationText.textContent = '';
 }
 
-/**
- * Fetch a recommendation when the availability check returns a conflict.
- * Uses the current draft accelerator and the shortcut name (for special
- * first candidates like "整理文本内容").
- */
-async function fetchRecommendation(accelerator, excludeId) {
-  if (!accelerator || !isValidShortcutFormat(accelerator)) {
-    hideRecommendation();
-    return;
-  }
+// --- Recommendation adoption ---
 
-  // Determine the shortcut name for special-candidate logic
-  const shortcutName = promptNameInput.value.trim() || undefined;
+adoptRecommendationBtn.addEventListener('click', () => {
+  draft.adoptRecommendation();
+});
 
-  let result;
-  try {
-    result = await window.electronAPI.recommendShortcut(accelerator, excludeId, shortcutName);
-  } catch {
-    result = null;
-  }
+// --- Modal field events → workflow module ---
 
-  if (result && result.accelerator) {
-    const display = formatAcceleratorForDisplay(result.accelerator);
-    recommendationText.innerHTML = '推荐使用 ' + display;
-    shortcutRecommendation.classList.remove('hidden');
-    noRecommendation.classList.add('hidden');
-    // Store the recommended accelerator on the button for re-check on click
-    adoptRecommendationBtn.dataset.accelerator = result.accelerator;
-  } else {
-    hideRecommendation();
-    noRecommendation.classList.remove('hidden');
-  }
-}
+promptNameInput.addEventListener('input', () => {
+  draft.setName(promptNameInput.value);
+});
 
-/**
- * Handle clicking the recommendation button.
- * Re-checks the recommended accelerator. If it's still available, writes it
- * to the draft input and triggers a new availability check. If it's no longer
- * available, fetches the next candidate from the fixed sequence.
- */
-adoptRecommendationBtn.addEventListener('click', async () => {
-  const recommended = adoptRecommendationBtn.dataset.accelerator;
-  if (!recommended) return;
-
-  // Re-check the recommended accelerator
-  let check;
-  try {
-    check = await window.electronAPI.checkShortcutAvailability(recommended, currentEditingId);
-  } catch {
-    check = { status: 'unavailable' };
-  }
-
-  if (check.status === 'available') {
-    // Write to draft and trigger availability display
-    keyboardShortcutInput.value = recommended;
-    shortcutCheckToken++;
-    lastAvailabilityResult = check;
-    showAvailabilityStatus('available', '✓ 当前可用');
-    hideRecommendation();
-  } else {
-    // The recommended candidate is no longer available — fetch the next one
-    // by asking for a new recommendation starting from the stale candidate
-    fetchRecommendation(recommended, currentEditingId);
-  }
+shortcutProviderSelect.addEventListener('change', () => {
+  draft.setProviderId(shortcutProviderSelect.value);
 });
 
 const macPermissionToggle = document.getElementById('mac-permission-toggle');
@@ -394,6 +421,8 @@ function handlePaste(e) {
   }
   const nodes = templateModule.parseTemplate(text);
   insertNodesAtCaret(nodes);
+  // Notify the workflow module of the updated template text
+  draft.setTemplate(getTemplateText());
 }
 
 promptTemplateInput.addEventListener('paste', handlePaste);
@@ -498,6 +527,8 @@ promptTemplateInput.addEventListener('input', () => {
     convertTextNodesToChips();
   }
   handleCompletionInput();
+  // Notify the workflow module of the updated template text
+  draft.setTemplate(getTemplateText());
 });
 
 // --- Completion Menu ---
@@ -626,6 +657,8 @@ function confirmSelection(varName) {
   sel.addRange(after);
 
   hideCompletionMenu();
+  // Notify the workflow module of the updated template text
+  draft.setTemplate(getTemplateText());
 }
 
 function handleCompletionInput() {
@@ -714,7 +747,7 @@ async function init() {
 // Mac Permission Guide Toggle
 macPermissionToggle.addEventListener('click', () => {
   const isHidden = macPermissionContent.classList.contains('hidden');
-  
+
   if (isHidden) {
     macPermissionContent.classList.remove('hidden');
     macPermissionIcon.style.transform = 'rotate(180deg)';
@@ -1109,26 +1142,29 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Modal Management
+// --- Shortcut Draft session lifecycle (modal open/close) ---
+
 addShortcutBtn.addEventListener('click', () => {
   if (providers.length === 0) {
     alert('请先添加至少一个 Provider，再创建快捷键。');
     return;
   }
 
-  currentEditingId = null;
   modalTitle.textContent = '添加新快捷键';
-  promptNameInput.value = '';
   renderShortcutProviderOptions();
-  shortcutProviderSelect.value = providers[0].id;
   shortcutProviderEmpty.classList.add('hidden');
-  keyboardShortcutInput.value = '';
-  setTemplateEditor('');
   templateError.classList.add('hidden');
-  shortcutCheckToken++;
-  lastAvailabilityResult = null;
-  hideAvailabilityStatus();
-  hideRecommendation();
+  savePromptBtn.disabled = false;
+
+  // Start a blank add session in the workflow module
+  draft.startAdd();
+
+  // Initialize template editor to empty
+  setTemplateEditor('');
+
+  // Set default provider
+  draft.setProviderId(providers[0].id);
+
   openModal();
 });
 
@@ -1136,19 +1172,24 @@ function editShortcut(id) {
   const shortcut = shortcuts.find(s => s.id === id);
   if (!shortcut) return;
 
-  currentEditingId = id;
   modalTitle.textContent = '编辑提示模板';
-  promptNameInput.value = shortcut.name;
   renderShortcutProviderOptions();
-  shortcutProviderSelect.value = shortcut.providerId || providers[0]?.id || '';
   shortcutProviderEmpty.classList.add('hidden');
-  keyboardShortcutInput.value = shortcut.shortcut;
-  setTemplateEditor(shortcut.template);
   templateError.classList.add('hidden');
-  shortcutCheckToken++;
-  lastAvailabilityResult = null;
-  hideAvailabilityStatus();
-  hideRecommendation();
+  savePromptBtn.disabled = false;
+
+  // Start an edit session initialized from the existing shortcut
+  draft.startEdit({
+    id: shortcut.id,
+    name: shortcut.name,
+    shortcut: shortcut.shortcut,
+    template: shortcut.template,
+    providerId: shortcut.providerId,
+  });
+
+  // Initialize template editor with the shortcut's template
+  setTemplateEditor(shortcut.template);
+
   openModal();
 }
 
@@ -1189,11 +1230,8 @@ function openModal() {
 
 function closeModal() {
   promptModal.classList.add('hidden');
-  currentEditingId = null;
-  shortcutCheckToken++;
-  lastAvailabilityResult = null;
-  hideAvailabilityStatus();
-  hideRecommendation();
+  // Close the draft session — all in-flight results become stale
+  draft.close();
 }
 
 closeModalBtn.addEventListener('click', closeModal);
@@ -1206,106 +1244,9 @@ promptModal.addEventListener('click', (e) => {
   }
 });
 
-// Save shortcut
-savePromptBtn.addEventListener('click', async () => {
-  const name = promptNameInput.value.trim();
-  const shortcut = keyboardShortcutInput.value.trim();
-  const template = getTemplateText().trim();
-  const providerId = shortcutProviderSelect.value;
-
-  // Validation
-  if (!name || !shortcut || !template) {
-    alert('请填写所有字段');
-    return;
-  }
-
-  // Re-check availability before saving (guard against status changes after initial check)
-  showAvailabilityStatus('checking', '正在检测…');
-  const checkResult = await window.electronAPI.checkShortcutAvailability(shortcut, currentEditingId);
-  shortcutCheckToken++; // invalidate any pending async checks
-  lastAvailabilityResult = checkResult;
-
-  if (checkResult.status !== 'available') {
-    switch (checkResult.status) {
-      case 'invalid':
-        showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
-        break;
-      case 'internal-conflict':
-        showAvailabilityStatus('internal-conflict', `✗ 与已有快捷键「${checkResult.conflictWith}」重复`);
-        break;
-      case 'external-conflict':
-        showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用');
-        break;
-      case 'unavailable':
-        showAvailabilityStatus('unavailable', '暂时无法检测，请重试');
-        break;
-    }
-    return;
-  }
-
-  if (!providerId) {
-    shortcutProviderEmpty.classList.remove('hidden');
-    return;
-  }
-
-  if (!templateModule.validateTemplate(template)) {
-    templateError.classList.remove('hidden');
-    return;
-  }
-
-  templateError.classList.add('hidden');
-  shortcutProviderEmpty.classList.add('hidden');
-
-  // Create or update shortcut
-  const shortcutData = {
-    id: currentEditingId || Date.now().toString(),
-    name,
-    shortcut,
-    template,
-    providerId
-  };
-
-  const saveResult = await window.electronAPI.saveShortcut(shortcutData);
-
-  if (!saveResult.success) {
-    // Save failed — preserve all form values and keep modal open
-    switch (saveResult.reason) {
-      case 'invalid':
-        showAvailabilityStatus('invalid', '无效组合：至少需要两个修饰键加一个普通键。');
-        hideRecommendation();
-        break;
-      case 'internal-conflict':
-        showAvailabilityStatus('internal-conflict', '✗ 与已有快捷键重复，请更换组合');
-        fetchRecommendation(shortcut, currentEditingId);
-        break;
-      case 'external-conflict':
-        showAvailabilityStatus('external-conflict', '✗ 可能被 macOS 或其他应用占用，请更换组合');
-        fetchRecommendation(shortcut, currentEditingId);
-        break;
-      case 'unavailable':
-        showAvailabilityStatus('unavailable', '暂时无法检测，请重试');
-        hideRecommendation();
-        break;
-      case 'registration-failed':
-        showAvailabilityStatus('external-conflict', '✗ 注册失败，该组合可能已被占用');
-        fetchRecommendation(shortcut, currentEditingId);
-        break;
-    }
-    return;
-  }
-
-  // Update local state
-  if (currentEditingId) {
-    const index = shortcuts.findIndex(s => s.id === currentEditingId);
-    if (index >= 0) {
-      shortcuts[index] = { ...shortcutData, inactive: false };
-    }
-  } else {
-    shortcuts.push({ ...shortcutData, inactive: false });
-  }
-
-  renderShortcuts();
-  closeModal();
+// Save shortcut — delegates entirely to the workflow module's save path
+savePromptBtn.addEventListener('click', () => {
+  draft.save();
 });
 
 // Keyboard shortcut capture
@@ -1372,9 +1313,10 @@ keyboardShortcutInput.addEventListener('keydown', (e) => {
 
   // 确保至少有修饰键+实际按键
   if (parts.length >= 2) {
-    keyboardShortcutInput.value = parts.join('+');
-    // Trigger availability check when a complete combo is captured
-    checkShortcutAvailability(parts.join('+'), currentEditingId);
+    const accelerator = parts.join('+');
+    // Route through the workflow module — it handles validation,
+    // availability check, and stale-result rejection
+    draft.setAccelerator(accelerator);
   }
 });
 
