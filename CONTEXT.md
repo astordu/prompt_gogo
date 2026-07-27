@@ -24,6 +24,22 @@ _Avoid_: Dropdown, autocomplete, 下拉框
 一个全局键盘组合（如 Control + Option + 9，显示为 `⌃⌥9`），绑定一个 Template 和一个 Provider，在任意应用中可触发。
 _Avoid_: Hotkey, 热键, keybinding
 
+**Run（运行任务）**:
+一次由 Shortcut 触发的 AI 文本处理过程。同一时刻最多存在一个活动 Run。
+_Avoid_: Task, 任务, Process, 请求
+
+**Output Target（输出目标）**:
+Run 触发时所在的应用与编辑位置。一个 Run 的所有状态提示和模型内容只能写入其原始 Output Target。
+_Avoid_: Current Focus, 当前焦点, Cursor, 光标
+
+**Run Indicator（运行提示）**:
+写入 Output Target 的短暂状态文本，包括等待首个模型内容时的 `Loading…`，以及正常结束后短暂显示的 `Ending…`。
+_Avoid_: Placeholder, 占位字, Status Text, Loading Text
+
+**Cancel Shortcut（取消快捷键）**:
+仅在 Run 活动期间生效的 `Command + Escape` 全局组合键，用于终止当前 Run。
+_Avoid_: Stop Shortcut, 停止键, Esc
+
 **Shortcut Conflict（快捷键冲突）**:
 候选快捷键无法注册。冲突的快捷键不可保存，但表单中的其他内容保持不变。
 _Avoid_: Hotkey conflict, 按键冲突
