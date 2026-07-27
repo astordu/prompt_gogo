@@ -46,7 +46,7 @@ GitHub issues 在上下文开头提供，包含所有 open issues 的正文和�
 
 # 提交
 
-做一个 git commit。commit message 必须包含：
+做一个 git commit。commit message 必须包含 (要用中文写commit)：
 
 1. 做出的关键决策
 2. 修改的文件
