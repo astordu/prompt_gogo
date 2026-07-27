@@ -12,23 +12,36 @@
 const { execFileSync } = require('child_process');
 
 const PASTE_ARGS = ['-e', 'tell application "System Events" to keystroke "v" using command down'];
-const BACKSPACE_ARGS = ['-e', 'tell application "System Events" to key code 51'];
+const LEFT_ARROW_KEYCODE = 123;
+const BACKSPACE_KEYCODE = 51;
 const CLIPBOARD_SETTLE_MS = 10;
 const PASTE_SETTLE_MS = 30;
-const BACKSPACE_SETTLE_MS = 30;
+const DELETE_SETTLE_MS = 30;
 
 const LOADING_TEXT = 'Loading\u2026'; // single ellipsis character …
 
 /**
- * Sends n backspace keystrokes via osascript.
+ * Builds the AppleScript arguments for selecting `count` characters
+ * backwards (Shift + Left arrow) and then deleting the selection with
+ * a single BackSpace.  This replaces the previous loop of N individual
+ * backspace presses so that the Run Indicator disappears as one unit
+ * instead of collapsing character-by-character.
+ *
+ * Exported so tests can assert the generated command.
  *
  * @param {number} count
- * @param {() => void} [backspaceFn] - injectable backspace sender
+ * @returns {string[]}
  */
-function sendBackspaces(count, backspaceFn) {
-  for (let i = 0; i < count; i++) {
-    backspaceFn();
-  }
+function buildSelectAndDeleteArgs(count) {
+  const script = [
+    'tell application "System Events"',
+    `  repeat ${count} times`,
+    `    key code ${LEFT_ARROW_KEYCODE} using {shift down}`,
+    '  end repeat',
+    `  key code ${BACKSPACE_KEYCODE}`,
+    'end tell',
+  ].join('\n');
+  return ['-e', script];
 }
 
 /**
@@ -37,13 +50,15 @@ function sendBackspaces(count, backspaceFn) {
  * @param {Object} [deps] - Optional dependency injection for testing
  * @param {Object} [deps.clipboard] - Electron clipboard module
  * @param {Function} [deps.paste] - Function that performs Cmd+V paste
- * @param {Function} [deps.backspace] - Function that sends one BackSpace key
+ * @param {Function} [deps.selectAndDelete] - Function that selects `count`
+ *   characters backwards and deletes the selection in one atomic action.
+ *   Receives the character count as its sole argument.
  */
 function createRunIndicatorSink(deps) {
   const cb = (deps && deps.clipboard) || null;
   const paste = (deps && deps.paste) || (() => execFileSync('osascript', PASTE_ARGS));
-  const backspace = (deps && deps.backspace) || (() => {
-    execFileSync('osascript', BACKSPACE_ARGS);
+  const selectAndDelete = (deps && deps.selectAndDelete) || ((count) => {
+    execFileSync('osascript', buildSelectAndDeleteArgs(count));
   });
 
   /**
@@ -59,15 +74,17 @@ function createRunIndicatorSink(deps) {
   }
 
   /**
-   * Deletes `count` characters backwards from the cursor.
+   * Deletes `count` characters backwards from the cursor as a single
+   * atomic operation (select backwards + one delete) instead of N
+   * individual backspace presses.
    * @param {number} count
    */
   async function deleteBack(count) {
-    sendBackspaces(count, backspace);
-    await new Promise(r => setTimeout(r, BACKSPACE_SETTLE_MS));
+    selectAndDelete(count);
+    await new Promise(r => setTimeout(r, DELETE_SETTLE_MS));
   }
 
   return { write, deleteBack };
 }
 
-module.exports = { createRunIndicatorSink, LOADING_TEXT, BACKSPACE_ARGS };
+module.exports = { createRunIndicatorSink, LOADING_TEXT, buildSelectAndDeleteArgs };
