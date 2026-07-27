@@ -2,13 +2,13 @@
 set -eo pipefail
 
 usage() {
-  echo "Usage: $0 <qodercli|claude>" >&2
+  echo "Usage: $0 <qodercli|claude|codex>" >&2
 }
 
 ADAPTER=${1:-}
 
 case "$ADAPTER" in
-  qodercli|claude)
+  qodercli|claude|codex)
     ;;
   *)
     usage
@@ -25,6 +25,9 @@ run_agent() {
       ;;
     claude)
       claude --dangerously-skip-permissions -p "$agent_prompt"
+      ;;
+    codex)
+      codex exec --dangerously-bypass-approvals-and-sandbox "$agent_prompt"
       ;;
   esac
 }

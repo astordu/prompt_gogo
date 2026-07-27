@@ -7,6 +7,7 @@ const { createClipboardSink } = require('./clipboard-sink');
 const { replaceVariables } = require('./template');
 const { buildRequestConfig, validateProviderConfig, migrateToProviders } = require('./provider');
 const { ShortcutService, createElectronRegistrar, createElectronStore } = require('./shortcut-service');
+const { RunCoordinator } = require('./run-coordinator');
 
 // Initialize config store
 const store = new Store({
@@ -34,6 +35,9 @@ let tray = null;
 
 // Shortcut management service (created in app.whenReady to ensure showNotification is available)
 let shortcutService = null;
+
+// Run coordinator (created in app.whenReady alongside shortcutService)
+let runCoordinator = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -165,20 +169,56 @@ async function handleShortcutTrigger(shortcutConfig) {
     return;
   }
 
-  const { execSync } = require('child_process');
-
-  console.log('\n步骤 1: 准备读取选中文本');
-
-  let selectedText = '';
-
-  // 方法1: 尝试使用 Accessibility API 直接读取选中文本
-  console.log('\n步骤 2: 使用 Accessibility API 读取选中文本');
-  console.log('🔍 直接从应用获取选中内容 (不使用剪贴板)...');
+  // Begin a single Run — rejected if one is already active
+  if (!runCoordinator.beginRun()) {
+    console.log('⏭️ 已有活动 Run，跳过本次触发');
+    return;
+  }
 
   try {
-    // 方法1: 创建临时 AppleScript 文件来避免引号问题
-    const fs = require('fs');
-    const os = require('os');
+    const selectedText = await runCoordinator.readText();
+
+    if (selectedText === null) {
+      // Cancelled during text read
+      showNotification('已取消', '运行任务已取消');
+      return;
+    }
+
+    if (!selectedText || selectedText.trim() === '') {
+      console.log('\n❌ 未能获取选中文本');
+      showNotification('未能获取文本', '请确保文本已选中\n或先 Cmd+C 复制后再试');
+      return;
+    }
+
+    console.log(`✅ 获取文本 (${selectedText.length} 字符)`);
+
+    const prompt = replaceVariables(shortcutConfig.template, { select_content: selectedText });
+
+    if (runCoordinator.isCancelled()) {
+      showNotification('已取消', '运行任务已取消');
+      return;
+    }
+
+    await processWithAI(prompt, shortcutConfig);
+  } catch (error) {
+    console.error('\n❌ 处理失败:', error.message);
+  } finally {
+    runCoordinator.endRun();
+  }
+}
+
+/**
+ * Read the currently selected text using Accessibility API, falling
+ * back to the clipboard method if needed.
+ * @returns {Promise<string>}
+ */
+async function readSelectedText() {
+  const { execSync } = require('child_process');
+  const fs = require('fs');
+  const os = require('os');
+
+  // Method 1: Accessibility API
+  try {
     const scriptPath = path.join(os.tmpdir(), 'get-selected-text.scpt');
 
     const appleScriptContent = `tell application "System Events"
@@ -201,71 +241,28 @@ async function handleShortcutTrigger(shortcutConfig) {
   end tell
 end tell`;
 
-    // 写入临时文件
     fs.writeFileSync(scriptPath, appleScriptContent, 'utf8');
 
-    // 执行 AppleScript 文件
     const result = execSync(`osascript "${scriptPath}"`, {
       encoding: 'utf8',
       timeout: 2000
     }).trim();
 
-    // 删除临时文件
     try {
       fs.unlinkSync(scriptPath);
-    } catch (e) {
-      // 忽略删除错误
+    } catch {
+      // ignore
     }
 
-    console.log(`📝 Accessibility API 返回: "${result.substring(0, 100)}${result.length > 100 ? '...' : ''}"`);
-
-    // 检查是否成功获取
     if (result && !result.startsWith('ERROR:') && result.trim() !== '') {
-      selectedText = result;
-      console.log(`✅ 成功通过 Accessibility API 获取文本 (${selectedText.length} 字符)`);
-      console.log('💡 这是最可靠的方法，不依赖剪贴板！');
-    } else {
-      console.log(`⚠️ Accessibility API 失败: ${result}`);
-      console.log('💡 原因可能是：');
-      console.log('   • 当前应用不支持 AXSelectedText 属性');
-      console.log('   • 没有选中任何文本');
-      console.log('   • 缺少辅助功能权限');
-      console.log('\n🔄 回退到剪贴板方法...');
-
-      // 方法2: 回退到剪贴板方法
-      selectedText = await fallbackToClipboard();
+      return result;
     }
-  } catch (error) {
-    console.error(`❌ Accessibility API 调用异常: ${error.message}`);
-    console.log('🔄 回退到剪贴板方法...');
-
-    // 方法2: 回退到剪贴板方法
-    selectedText = await fallbackToClipboard();
+  } catch {
+    // fall through to clipboard
   }
 
-  // 检查最终结果
-  if (!selectedText || selectedText.trim() === '') {
-    console.log('\n❌ 所有方法均失败，未能获取选中文本');
-    console.log('💡 建议：');
-    console.log('   ① 确保文本已被选中（高亮显示）');
-    console.log('   ② 或者先 Cmd+C 复制，再按快捷键');
-    console.log('   ③ 检查是否授予了辅助功能权限');
-
-    showNotification('未能获取文本', '请确保文本已选中\n或先 Cmd+C 复制后再试');
-    return;
-  }
-
-  console.log('\n步骤 3: 使用模板处理文本');
-  console.log(`📋 模板: ${shortcutConfig.template.substring(0, 50)}...`);
-  const prompt = replaceVariables(shortcutConfig.template, { select_content: selectedText });
-
-  // Step 4: Call AI via the bound Provider
-  console.log('\n步骤 4: 通过 Provider 调用 AI');
-  try {
-    await processWithAI(prompt, shortcutConfig);
-  } catch (error) {
-    console.error('\n❌ 处理失败:', error.message);
-  }
+  // Method 2: Clipboard fallback
+  return await fallbackToClipboard();
 }
 
 // 回退方法：使用剪贴板方式获取文本
@@ -568,6 +565,20 @@ app.whenReady().then(() => {
 
   migrateTemplates();
   migrateProviders();
+
+  // Create the run coordinator with globalShortcut as the cancel registrar
+  runCoordinator = new RunCoordinator({
+    cancelRegistrar: {
+      register(accelerator, callback) {
+        return globalShortcut.register(accelerator, callback);
+      },
+      unregister(accelerator) {
+        globalShortcut.unregister(accelerator);
+      },
+    },
+    onNotify: (title, body) => showNotification(title, body),
+    readSelectedText: () => readSelectedText(),
+  });
 
   // Create the shortcut management service with injectable dependencies
   shortcutService = new ShortcutService({
