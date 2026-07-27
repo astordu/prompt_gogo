@@ -95,6 +95,46 @@ npm run dev
 npm start
 ```
 
+#### 在 macOS 上定时运行 Ralph
+
+`ralph/cronjobloop.sh` 每次执行时会先结束本项目中仍在运行的
+`afk.sh claude 20`，然后重新运行一轮。脚本会根据自身位置获取项目的
+绝对路径，不会结束其他项目中的 Ralph 进程。
+
+先赋予脚本执行权限并手动测试：
+
+```bash
+cd /Users/dulei/Documents/project/prompt_gogo
+chmod +x ralph/cronjobloop.sh
+./ralph/cronjobloop.sh
+```
+
+执行以下命令编辑当前用户的 crontab：
+
+```bash
+crontab -e
+```
+
+加入下面这一行，使任务在每个整点运行一次：
+
+```cron
+0 * * * * /bin/zsh -lc '/Users/dulei/Documents/project/prompt_gogo/ralph/cronjobloop.sh >> /tmp/ralph-cron.log 2>&1'
+```
+
+保存后可以查看配置和运行日志：
+
+```bash
+crontab -l
+tail -f /tmp/ralph-cron.log
+```
+
+需要临时测试定时任务时，可以将 `0 * * * *` 改成 `* * * * *`，使其
+每分钟运行一次；测试完成后应改回每小时运行。
+
+如果日志出现 `Operation not permitted`，请打开 macOS
+“系统设置 → 隐私与安全性 → 完全磁盘访问权限”，为 `/usr/sbin/cron`
+开启权限。
+
 #### 打包发布
 
 ```bash
