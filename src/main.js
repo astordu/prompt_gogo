@@ -325,7 +325,7 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
 
   const requestConfig = buildRequestConfig(provider);
 
-  // Show Loading… indicator before sending the request.
+  // Show Loading indicator before sending the request.
   // This replaces the original selected text with the Run Indicator.
   const loadingShown = await runCoordinator.showLoading(originalSelectedText || '');
   if (!loadingShown) {
@@ -491,7 +491,7 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
     }
 
     // Normal completion: if we received non-empty model content,
-    // show Ending… for 500ms as a brief completion indicator.
+    // show Ending indicator for 500ms as a brief completion indicator.
     if (runCoordinator.hasModelContent()) {
       const endingResult = await runCoordinator.showEnding();
       // showEnding handles cancel during the hold period internally:
@@ -545,7 +545,7 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
     // If we haven't received any model content yet, abort Loading
     // and restore the original text.
     // If partial content was already written, it is preserved —
-    // no Ending… or Error… inline text is inserted.
+    // no Ending or Error… inline text is inserted.
     if (runCoordinator.isShowingLoading()) {
       await runCoordinator.abortLoading();
     }

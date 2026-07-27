@@ -33,7 +33,7 @@ Run 触发时所在的应用与编辑位置。一个 Run 的所有状态提示�
 _Avoid_: Current Focus, 当前焦点, Cursor, 光标
 
 **Run Indicator（运行提示）**:
-写入 Output Target 的短暂状态文本，包括等待首个模型内容时的 `Loading…`，以及正常结束后短暂显示的 `Ending…`。
+写入 Output Target 的短暂状态文本，包括等待首个模型内容时的 `S`，以及正常结束后短暂显示的 `E`。
 _Avoid_: Placeholder, 占位字, Status Text, Loading Text
 
 **Cancel Shortcut（取消快捷键）**:

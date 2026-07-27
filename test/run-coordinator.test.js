@@ -845,12 +845,12 @@ describe('Output Target — full lifecycle with invalidation', () => {
 // ---------------------------------------------------------------------------
 
 describe('showLoading — insertion timing', () => {
-  test('writes Loading… with single ellipsis character', async () => {
+  test('writes Loading indicator S', async () => {
     const { coordinator, runIndicator } = makeCoordinator();
     coordinator.beginRun();
     await coordinator.showLoading('original text');
     assert.strictEqual(runIndicator._writes().length, 1);
-    assert.strictEqual(runIndicator._writes()[0], 'Loading\u2026');
+    assert.strictEqual(runIndicator._writes()[0], 'S');
   });
 
   test('isShowingLoading is true after showLoading', async () => {
@@ -913,7 +913,7 @@ describe('showLoading — cancellation', () => {
 // Tests: Loading indicator — first model content replacement
 // ---------------------------------------------------------------------------
 
-describe('onModelContent — first content replaces Loading…', () => {
+describe('onModelContent — first content replaces Loading indicator', () => {
   test('non-empty chunk clears Loading and returns true', async () => {
     const { coordinator, runIndicator } = makeCoordinator();
     coordinator.beginRun();
@@ -923,7 +923,7 @@ describe('onModelContent — first content replaces Loading…', () => {
     assert.strictEqual(cleared, true);
     assert.strictEqual(coordinator.isShowingLoading(), false);
     // Should have deleted exactly LOADING_TEXT.length characters
-    assert.strictEqual(runIndicator._deleteCount(), 'Loading\u2026'.length);
+    assert.strictEqual(runIndicator._deleteCount(), 'S'.length);
   });
 
   test('empty chunk does not clear Loading', async () => {
@@ -956,7 +956,7 @@ describe('onModelContent — first content replaces Loading…', () => {
     const cleared = await coordinator.onModelContent('second');
     assert.strictEqual(cleared, false);
     // Only one deleteBack should have happened
-    assert.strictEqual(runIndicator._deleteCount(), 'Loading\u2026'.length);
+    assert.strictEqual(runIndicator._deleteCount(), 'S'.length);
   });
 
   test('onModelContent returns false when Loading not active', async () => {
@@ -982,7 +982,7 @@ describe('onModelContent — first content replaces Loading…', () => {
 // ---------------------------------------------------------------------------
 
 describe('abortLoading — removes Loading and restores original text', () => {
-  test('deletes Loading… and writes back original text', async () => {
+  test('deletes Loading indicator and writes back original text', async () => {
     const { coordinator, runIndicator } = makeCoordinator();
     coordinator.beginRun();
     await coordinator.showLoading('original selected text');
@@ -991,11 +991,11 @@ describe('abortLoading — removes Loading and restores original text', () => {
     assert.strictEqual(restored, true);
     assert.strictEqual(coordinator.isShowingLoading(), false);
 
-    // Operations: write(Loading…), deleteBack(len), write(original)
+    // Operations: write(Loading), deleteBack(len), write(original)
     const ops = runIndicator._operations();
     assert.strictEqual(ops.length, 3);
     assert.strictEqual(ops[0].type, 'write');
-    assert.strictEqual(ops[0].text, 'Loading\u2026');
+    assert.strictEqual(ops[0].text, 'S');
     assert.strictEqual(ops[1].type, 'deleteBack');
     assert.strictEqual(ops[2].type, 'write');
     assert.strictEqual(ops[2].text, 'original selected text');
@@ -1026,7 +1026,7 @@ describe('abortLoading — removes Loading and restores original text', () => {
 
     await coordinator.abortLoading();
     const ops = runIndicator._operations();
-    // write(Loading…), deleteBack, write('')
+    // write(Loading), deleteBack, write('')
     assert.strictEqual(ops[2].type, 'write');
     assert.strictEqual(ops[2].text, '');
   });
@@ -1570,12 +1570,12 @@ describe('Integration — streaming cancellation', () => {
     // Now cancel mid-stream
     coordinator.cancel();
 
-    // Verify: no Ending… was shown, no original text restoration
+    // Verify: no Ending was shown, no original text restoration
     // Only Loading write + Loading deleteBack should have happened
     const ops = runIndicator._operations();
     const writes = ops.filter(o => o.type === 'write').map(o => o.text);
-    // Loading… was written; no restore of 'original' happened
-    assert.ok(writes.includes('Loading\u2026'));
+    // Loading indicator was written; no restore of 'original' happened
+    assert.ok(writes.includes('S'));
     assert.ok(!writes.includes('original'));
   });
 });
@@ -1621,8 +1621,8 @@ describe('showEnding — pre-conditions', () => {
   });
 });
 
-describe('showEnding — writes Ending… with single ellipsis', () => {
-  test('writes Ending… after model content', async () => {
+describe('showEnding — writes Ending indicator E', () => {
+  test('writes E after model content', async () => {
     const clock = createFakeClock();
     const { coordinator, runIndicator } = makeCoordinator({ delay: clock.delay });
     coordinator.beginRun();
@@ -1634,10 +1634,10 @@ describe('showEnding — writes Ending… with single ellipsis', () => {
     const result = await endingPromise;
 
     assert.strictEqual(result, true);
-    // Should have written Ending…
+    // Should have written Ending indicator
     const writes = runIndicator._writes();
     assert.ok(writes.includes(ENDING_TEXT));
-    assert.strictEqual(ENDING_TEXT, 'Ending\u2026'); // single ellipsis
+    assert.strictEqual(ENDING_TEXT, 'E');
   });
 
   test('isShowingEnding is true during the 500ms hold', async () => {
@@ -1662,7 +1662,7 @@ describe('showEnding — writes Ending… with single ellipsis', () => {
 });
 
 describe('showEnding — exactly 500ms hold', () => {
-  test('Ending… is held for exactly 500ms before removal', async () => {
+  test('Ending is held for exactly 500ms before removal', async () => {
     const clock = createFakeClock();
     const { coordinator, runIndicator } = makeCoordinator({ delay: clock.delay });
     coordinator.beginRun();
@@ -1678,10 +1678,10 @@ describe('showEnding — exactly 500ms hold', () => {
     await clock.advance();
     await endingPromise;
 
-    // Ending… should have been deleted after the hold
+    // Ending should have been deleted after the hold
     assert.strictEqual(coordinator.isShowingEnding(), false);
-    // deleteBack calls: one for Loading…, one for Ending…
-    assert.strictEqual(runIndicator._deleteCount(), 'Loading\u2026'.length + ENDING_TEXT.length);
+    // deleteBack calls: one for Loading, one for Ending
+    assert.strictEqual(runIndicator._deleteCount(), 'S'.length + ENDING_TEXT.length);
   });
 
   test('Run stays active during Ending hold period', async () => {
@@ -1795,7 +1795,7 @@ describe('showEnding — cancel during Ending hold', () => {
     // Treated as successful completion
     assert.strictEqual(result, true);
     assert.strictEqual(coordinator.isShowingEnding(), false);
-    // Ending… was deleted early
+    // Ending was deleted early
   });
 
   test('cancel during Ending does not send cancel notification', async () => {
@@ -1826,7 +1826,7 @@ describe('showEnding — target invalidation', () => {
     const notifier = createFakeNotifier();
     const runIndicator = createFakeRunIndicator();
 
-    // Indicator that invalidates target only during Ending… write
+    // Indicator that invalidates target only during Ending write
     const invalidatingIndicator = {
       async write(text) {
         runIndicator._operations().push({ type: 'write', text });
@@ -1883,7 +1883,7 @@ describe('showEnding — target invalidation', () => {
     // Target invalid notification was sent
     assert.strictEqual(notifier._count(), 1);
     assert.ok(notifier._all()[0].title.includes('失效'));
-    // Ending… was NOT deleted (target invalid)
+    // Ending was NOT deleted (target invalid)
   });
 
   test('target invalid during Ending hold does not delete from new focus', async () => {
@@ -1900,7 +1900,7 @@ describe('showEnding — target invalidation', () => {
     await clock.advance();
     await endingPromise;
 
-    // Only one deleteBack (for Loading…). No deleteBack for Ending… because
+    // Only one deleteBack (for Loading). No deleteBack for Ending because
     // target was invalid.
     const deleteOps = runIndicator._operations().filter(o => o.type === 'deleteBack');
     assert.strictEqual(deleteOps.length, 1); // only Loading delete
@@ -1918,7 +1918,7 @@ describe('showEnding — empty stream is failure', () => {
     const result = await coordinator.showEnding();
     assert.strictEqual(result, false);
     assert.strictEqual(coordinator.hasModelContent(), false);
-    // No Ending… written
+    // No Ending written
     assert.ok(!runIndicator._writes().includes(ENDING_TEXT));
   });
 });
@@ -1969,14 +1969,14 @@ describe('showEnding — full lifecycle integration', () => {
     assert.strictEqual(coordinator.isActive(), false);
 
     // Operations sequence:
-    // 1. write(Loading…)
-    // 2. deleteBack(Loading… length)
-    // 3. write(Ending…)
-    // 4. deleteBack(Ending… length)
+    // 1. write(Loading)
+    // 2. deleteBack(Loading length)
+    // 3. write(Ending)
+    // 4. deleteBack(Ending length)
     const ops = runIndicator._operations();
     assert.strictEqual(ops.length, 4);
     assert.strictEqual(ops[0].type, 'write');
-    assert.strictEqual(ops[0].text, 'Loading\u2026');
+    assert.strictEqual(ops[0].text, 'S');
     assert.strictEqual(ops[1].type, 'deleteBack');
     assert.strictEqual(ops[2].type, 'write');
     assert.strictEqual(ops[2].text, ENDING_TEXT);

@@ -24,8 +24,8 @@
 
 const CANCEL_ACCELERATOR = 'Command+Escape';
 
-const LOADING_TEXT = 'Loading\u2026'; // single ellipsis character …
-const ENDING_TEXT = 'Ending\u2026';   // single ellipsis character …
+const LOADING_TEXT = 'S';
+const ENDING_TEXT = 'E';
 const ENDING_HOLD_MS = 500;
 
 /**
@@ -249,7 +249,7 @@ class RunCoordinator {
   // ------------------------------------------------------------------
 
   /**
-   * Show the `Loading…` indicator, replacing the original selected
+   * Show the `S` indicator, replacing the original selected
    * text. Called after the selected text has been safely captured
    * and provider/request configuration validation has passed — just
    * before the HTTP request is sent.
@@ -303,7 +303,7 @@ class RunCoordinator {
     // Track that we've received non-empty model content
     this._hasModelContent = true;
 
-    // Remove Loading… before writing the real content
+    // Remove Loading indicator before writing the real content
     if (!this.validateTarget()) return false;
 
     if (this._runIndicator) {
@@ -318,7 +318,7 @@ class RunCoordinator {
   }
 
   /**
-   * Abort the Loading phase: remove the `Loading…` indicator and
+   * Abort the Loading phase: remove the `S` indicator and
    * restore the original selected text. Called when an error or
    * cancellation occurs before the first model content.
    *
@@ -332,7 +332,7 @@ class RunCoordinator {
     if (!this.validateTarget()) return false;
 
     if (this._runIndicator) {
-      // Delete Loading…
+      // Delete Loading indicator
       await this._runIndicator.deleteBack(LOADING_TEXT.length);
       // Restore original text
       if (this._loadingOriginalText !== null) {
@@ -349,9 +349,9 @@ class RunCoordinator {
   // ------------------------------------------------------------------
 
   /**
-   * Show the `Ending…` indicator after normal stream completion.
+   * Show the `E` indicator after normal stream completion.
    *
-   * Writes `Ending…` after the last model content, then holds for
+   * Writes `E` after the last model content, then holds for
    * exactly 500ms before removing it. The Run remains active during
    * the hold period.
    *
@@ -361,7 +361,7 @@ class RunCoordinator {
    * - Non-empty model content was received (`_hasModelContent`).
    * - The Output Target is still valid.
    *
-   * If cancelled during the 500ms hold, the `Ending…` is removed
+   * If cancelled during the 500ms hold, the `E` is removed
    * immediately and the Run completes as successful (no cancel
    * notification).
    *
@@ -375,21 +375,21 @@ class RunCoordinator {
     if (!this._hasModelContent) return false;
     if (!this.validateTarget()) return false;
 
-    // Write Ending…
+    // Write Ending indicator
     if (this._runIndicator) {
       await this._runIndicator.write(ENDING_TEXT);
     }
 
     // Re-check after async write
     if (this._cancelled) {
-      // Cancelled during write — remove Ending… immediately (if target valid)
+      // Cancelled during write — remove Ending immediately (if target valid)
       if (this.validateTarget() && this._runIndicator) {
         await this._runIndicator.deleteBack(ENDING_TEXT.length);
       }
       return false;
     }
     if (this._checkTargetInvalidated()) {
-      // Target invalid — Ending… may be in the old target; can't clean up
+      // Target invalid — Ending may be in the old target; can't clean up
       this._endingActive = false;
       return false;
     }
@@ -399,7 +399,7 @@ class RunCoordinator {
     // Hold for 500ms — cancellation or target invalidity can interrupt
     await this._delay(ENDING_HOLD_MS);
 
-    // If cancelled during the hold, remove Ending… immediately and
+    // If cancelled during the hold, remove Ending immediately and
     // treat as successful completion (no cancel notification).
     if (this._cancelled) {
       if (this.validateTarget() && this._runIndicator) {
@@ -409,7 +409,7 @@ class RunCoordinator {
       return true;
     }
 
-    // Normal completion: remove Ending… after the hold
+    // Normal completion: remove Ending after the hold
     if (!this.validateTarget()) {
       // Target became invalid during the hold — can't clean up
       this._endingActive = false;

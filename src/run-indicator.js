@@ -2,7 +2,7 @@
 
 /**
  * Run Indicator sink — writes and removes inline Run Indicators
- * (`Loading…`) in the Output Target via clipboard paste and
+ * (`S`) in the Output Target via clipboard paste and
  * backspace key simulation.
  *
  * The sink uses dependency injection for clipboard and key-sending
@@ -18,7 +18,7 @@ const CLIPBOARD_SETTLE_MS = 10;
 const PASTE_SETTLE_MS = 30;
 const DELETE_SETTLE_MS = 30;
 
-const LOADING_TEXT = 'Loading\u2026'; // single ellipsis character …
+const LOADING_TEXT = 'S';
 
 /**
  * Builds the AppleScript arguments for selecting `count` characters
