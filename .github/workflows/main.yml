@@ -47,7 +47,7 @@ jobs:
       - name: 运行 Agent 分流并打标签
         shell: bash
         env:
-          ADAPTER: ${{ vars.TRIAGE_ADAPTER || 'qodercli' }}
+          ADAPTER: ${{ vars.TRIAGE_ADAPTER || 'claude' }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
