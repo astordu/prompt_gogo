@@ -490,6 +490,28 @@ async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
       return;
     }
 
+    // Normal completion: if we received non-empty model content,
+    // show Ending… for 500ms as a brief completion indicator.
+    if (runCoordinator.hasModelContent()) {
+      const endingResult = await runCoordinator.showEnding();
+      // showEnding handles cancel during the hold period internally:
+      // if cancelled during Ending, it removes the indicator and
+      // treats the Run as successful (no cancel notification).
+      if (!endingResult && runCoordinator.isTargetInvalid()) {
+        // Target became invalid during Ending — notification already sent
+        return;
+      }
+      // If endingResult is false due to cancellation during Ending,
+      // the Run completed successfully — fall through to success.
+    } else {
+      // No model content received — treat as failure
+      if (runCoordinator.isShowingLoading()) {
+        await runCoordinator.abortLoading();
+      }
+      showNotification('错误', '未收到任何模型内容');
+      return;
+    }
+
     const fullText = collected.join('');
     const elapsed = Date.now() - startTime;
     console.log(`\n✅ 流式响应完成 (总耗时: ${elapsed}ms)`);

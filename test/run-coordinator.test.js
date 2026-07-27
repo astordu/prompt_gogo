@@ -2,7 +2,7 @@
 
 const { describe, test, beforeEach } = require('node:test');
 const assert = require('node:assert');
-const { RunCoordinator, CANCEL_ACCELERATOR } = require('../src/run-coordinator');
+const { RunCoordinator, CANCEL_ACCELERATOR, ENDING_TEXT, ENDING_HOLD_MS } = require('../src/run-coordinator');
 const { pipeToCursor } = require('../src/stream-output');
 
 // ---------------------------------------------------------------------------
@@ -161,6 +161,7 @@ function makeCoordinator(opts = {}) {
   const reader = opts.reader || createFakeTextReader(opts.text !== undefined ? opts.text : 'selected text');
   const outputTarget = opts.outputTarget || createFakeOutputTarget();
   const runIndicator = opts.runIndicator || createFakeRunIndicator();
+  const delay = opts.delay;
 
   const coordinator = new RunCoordinator({
     cancelRegistrar: registrar,
@@ -168,9 +169,46 @@ function makeCoordinator(opts = {}) {
     readSelectedText: () => reader.read(),
     outputTarget,
     runIndicator,
+    delay,
   });
 
   return { coordinator, registrar, notifier, reader, outputTarget, runIndicator };
+}
+
+/**
+ * Creates a fake clock that can be controlled for deterministic timing.
+ *
+ * The delay function returns a promise that resolves when the clock
+ * is advanced. The `advance` method also yields to the microtask
+ * queue before resolving, allowing async continuations that register
+ * new delays to be processed correctly.
+ */
+function createFakeClock() {
+  const pending = []; // { resolve, ms }
+  let advanced = false;
+
+  return {
+    delay(ms) {
+      return new Promise(resolve => {
+        if (advanced) {
+          // Time already advanced — resolve immediately
+          resolve();
+          return;
+        }
+        pending.push({ resolve });
+      });
+    },
+    async advance() {
+      advanced = true;
+      // Yield to allow async continuations to register their delays
+      await new Promise(r => setTimeout(r, 0));
+      // Now resolve all pending delays
+      for (const p of pending) {
+        p.resolve();
+      }
+      pending.length = 0;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1539,5 +1577,460 @@ describe('Integration — streaming cancellation', () => {
     // Loading… was written; no restore of 'original' happened
     assert.ok(writes.includes('Loading\u2026'));
     assert.ok(!writes.includes('original'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Ending indicator — normal Run completion
+// ---------------------------------------------------------------------------
+
+describe('showEnding — pre-conditions', () => {
+  test('returns false when no Run is active', async () => {
+    const { coordinator } = makeCoordinator();
+    const result = await coordinator.showEnding();
+    assert.strictEqual(result, false);
+  });
+
+  test('returns false when cancelled', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    coordinator.cancel();
+    const result = await coordinator.showEnding();
+    assert.strictEqual(result, false);
+  });
+
+  test('returns false when no model content was received', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    // No onModelContent called — no model content
+    const result = await coordinator.showEnding();
+    assert.strictEqual(result, false);
+    assert.strictEqual(runIndicator._writes().length, 0);
+  });
+
+  test('returns false when target is invalid', async () => {
+    const clock = createFakeClock();
+    const { coordinator, outputTarget, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+    outputTarget._invalidate();
+    const result = await coordinator.showEnding();
+    assert.strictEqual(result, false);
+    assert.strictEqual(runIndicator._writes().filter(w => w === ENDING_TEXT).length, 0);
+  });
+});
+
+describe('showEnding — writes Ending… with single ellipsis', () => {
+  test('writes Ending… after model content', async () => {
+    const clock = createFakeClock();
+    const { coordinator, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('Hello');
+
+    const endingPromise = coordinator.showEnding();
+    await clock.advance();
+    const result = await endingPromise;
+
+    assert.strictEqual(result, true);
+    // Should have written Ending…
+    const writes = runIndicator._writes();
+    assert.ok(writes.includes(ENDING_TEXT));
+    assert.strictEqual(ENDING_TEXT, 'Ending\u2026'); // single ellipsis
+  });
+
+  test('isShowingEnding is true during the 500ms hold', async () => {
+    const clock = createFakeClock();
+    const { coordinator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to allow showEnding to reach the delay point
+    await new Promise(r => setTimeout(r, 0));
+    // During the hold — Ending should be active
+    assert.strictEqual(coordinator.isShowingEnding(), true);
+
+    await clock.advance();
+    await endingPromise;
+
+    // After the hold — Ending should be cleared
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+  });
+});
+
+describe('showEnding — exactly 500ms hold', () => {
+  test('Ending… is held for exactly 500ms before removal', async () => {
+    const clock = createFakeClock();
+    const { coordinator, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to allow showEnding to reach the delay point
+    await new Promise(r => setTimeout(r, 0));
+    // Before time advance — Ending should still be showing
+    assert.strictEqual(coordinator.isShowingEnding(), true);
+
+    await clock.advance();
+    await endingPromise;
+
+    // Ending… should have been deleted after the hold
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+    // deleteBack calls: one for Loading…, one for Ending…
+    assert.strictEqual(runIndicator._deleteCount(), 'Loading\u2026'.length + ENDING_TEXT.length);
+  });
+
+  test('Run stays active during Ending hold period', async () => {
+    const clock = createFakeClock();
+    const { coordinator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // During the hold — Run should still be active
+    assert.strictEqual(coordinator.isActive(), true);
+
+    await clock.advance();
+    await endingPromise;
+
+    // Run is still active until endRun is called by the caller
+    assert.strictEqual(coordinator.isActive(), true);
+  });
+
+  test('Cancel Shortcut stays registered during Ending hold', async () => {
+    const clock = createFakeClock();
+    const { coordinator, registrar } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    assert.ok(registrar._has(CANCEL_ACCELERATOR));
+
+    await clock.advance();
+    await endingPromise;
+
+    assert.ok(registrar._has(CANCEL_ACCELERATOR));
+    coordinator.endRun();
+    assert.ok(!registrar._has(CANCEL_ACCELERATOR));
+  });
+});
+
+describe('showEnding — mutual exclusion during Ending hold', () => {
+  test('second beginRun is rejected during Ending hold', async () => {
+    const clock = createFakeClock();
+    const { coordinator, notifier } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    notifier._clear();
+
+    // Try to begin another Run during Ending hold
+    const secondResult = coordinator.beginRun();
+    assert.strictEqual(secondResult, false);
+    assert.strictEqual(notifier._count(), 1);
+    assert.ok(notifier._all()[0].title.includes('已有运行任务'));
+
+    await clock.advance();
+    await endingPromise;
+    coordinator.endRun();
+  });
+});
+
+describe('showEnding — cancel during Ending hold', () => {
+  test('cancel during Ending removes indicator immediately and treats as success', async () => {
+    const clock = createFakeClock();
+    const { coordinator, runIndicator, notifier } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to allow showEnding to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+    assert.strictEqual(coordinator.isShowingEnding(), true);
+
+    // Cancel during the hold
+    coordinator.cancel();
+    // Advance clock to allow the delay to resolve (cancel path removes Ending immediately)
+    await clock.advance();
+    const result = await endingPromise;
+
+    // showEnding returns true — treated as successful completion
+    assert.strictEqual(result, true);
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+
+    // No cancel notification was sent
+    const cancelNotifs = notifier._all().filter(
+      n => n.title.includes('取消') || n.body.includes('取消')
+    );
+    assert.strictEqual(cancelNotifs.length, 0);
+  });
+
+  test('cancel via Cancel Shortcut during Ending removes indicator immediately', async () => {
+    const clock = createFakeClock();
+    const { coordinator, registrar, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to allow showEnding to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+    assert.strictEqual(coordinator.isShowingEnding(), true);
+
+    // Trigger Cancel Shortcut during the hold
+    registrar._trigger(CANCEL_ACCELERATOR);
+
+    await clock.advance();
+    const result = await endingPromise;
+
+    // Treated as successful completion
+    assert.strictEqual(result, true);
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+    // Ending… was deleted early
+  });
+
+  test('cancel during Ending does not send cancel notification', async () => {
+    const clock = createFakeClock();
+    const { coordinator, notifier } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+    notifier._clear();
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to allow showEnding to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+
+    coordinator.cancel();
+    await clock.advance();
+    await endingPromise;
+
+    // No notifications at all — Ending cancel is silent
+    assert.strictEqual(notifier._count(), 0);
+  });
+});
+
+describe('showEnding — target invalidation', () => {
+  test('target invalid during Ending write returns false', async () => {
+    const clock = createFakeClock();
+    const outputTarget = createFakeOutputTarget();
+    const notifier = createFakeNotifier();
+    const runIndicator = createFakeRunIndicator();
+
+    // Indicator that invalidates target only during Ending… write
+    const invalidatingIndicator = {
+      async write(text) {
+        runIndicator._operations().push({ type: 'write', text });
+        if (text === ENDING_TEXT) {
+          outputTarget._invalidate();
+        }
+      },
+      async deleteBack(count) {
+        runIndicator._operations().push({ type: 'deleteBack', count });
+      },
+    };
+
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: (t, b) => notifier.notify(t, b),
+      readSelectedText: async () => 'text',
+      outputTarget,
+      runIndicator: invalidatingIndicator,
+      delay: clock.delay,
+    });
+
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+    notifier._clear();
+
+    const result = await coordinator.showEnding();
+    assert.strictEqual(result, false);
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+    // Target invalid notification was sent
+    assert.strictEqual(notifier._count(), 1);
+    assert.ok(notifier._all()[0].title.includes('失效'));
+  });
+
+  test('target invalid during Ending hold returns false', async () => {
+    const clock = createFakeClock();
+    const { coordinator, outputTarget, notifier, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+    notifier._clear();
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+    // Target becomes invalid during the hold
+    outputTarget._invalidate();
+
+    await clock.advance();
+    const result = await endingPromise;
+
+    assert.strictEqual(result, false);
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+    // Target invalid notification was sent
+    assert.strictEqual(notifier._count(), 1);
+    assert.ok(notifier._all()[0].title.includes('失效'));
+    // Ending… was NOT deleted (target invalid)
+  });
+
+  test('target invalid during Ending hold does not delete from new focus', async () => {
+    const clock = createFakeClock();
+    const { coordinator, outputTarget, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+    outputTarget._invalidate();
+    await clock.advance();
+    await endingPromise;
+
+    // Only one deleteBack (for Loading…). No deleteBack for Ending… because
+    // target was invalid.
+    const deleteOps = runIndicator._operations().filter(o => o.type === 'deleteBack');
+    assert.strictEqual(deleteOps.length, 1); // only Loading delete
+  });
+});
+
+describe('showEnding — empty stream is failure', () => {
+  test('showEnding returns false when no model content received', async () => {
+    const clock = createFakeClock();
+    const { coordinator, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    // No onModelContent — stream ended without any content
+    const result = await coordinator.showEnding();
+    assert.strictEqual(result, false);
+    assert.strictEqual(coordinator.hasModelContent(), false);
+    // No Ending… written
+    assert.ok(!runIndicator._writes().includes(ENDING_TEXT));
+  });
+});
+
+describe('showEnding — [DONE] and natural close both enter normal completion', () => {
+  test('hasModelContent is true after first non-empty chunk', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    assert.strictEqual(coordinator.hasModelContent(), false);
+
+    await coordinator.onModelContent('content');
+    assert.strictEqual(coordinator.hasModelContent(), true);
+  });
+
+  test('hasModelContent stays false for empty chunks', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    await coordinator.onModelContent('');
+    assert.strictEqual(coordinator.hasModelContent(), false);
+
+    await coordinator.onModelContent(null);
+    assert.strictEqual(coordinator.hasModelContent(), false);
+  });
+});
+
+describe('showEnding — full lifecycle integration', () => {
+  test('Loading → content → Ending → cleanup', async () => {
+    const clock = createFakeClock();
+    const { coordinator, runIndicator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('selected text');
+    await coordinator.onModelContent('Hello world');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+    assert.strictEqual(coordinator.isShowingEnding(), true);
+
+    await clock.advance();
+    const result = await endingPromise;
+    assert.strictEqual(result, true);
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isActive(), false);
+
+    // Operations sequence:
+    // 1. write(Loading…)
+    // 2. deleteBack(Loading… length)
+    // 3. write(Ending…)
+    // 4. deleteBack(Ending… length)
+    const ops = runIndicator._operations();
+    assert.strictEqual(ops.length, 4);
+    assert.strictEqual(ops[0].type, 'write');
+    assert.strictEqual(ops[0].text, 'Loading\u2026');
+    assert.strictEqual(ops[1].type, 'deleteBack');
+    assert.strictEqual(ops[2].type, 'write');
+    assert.strictEqual(ops[2].text, ENDING_TEXT);
+    assert.strictEqual(ops[3].type, 'deleteBack');
+    assert.strictEqual(ops[3].count, ENDING_TEXT.length);
+  });
+
+  test('endRun clears Ending state', async () => {
+    const clock = createFakeClock();
+    const { coordinator } = makeCoordinator({ delay: clock.delay });
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isShowingEnding(), false);
+    assert.strictEqual(coordinator.hasModelContent(), false);
+  });
+
+  test('hasModelContent resets on endRun', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+    assert.strictEqual(coordinator.hasModelContent(), true);
+
+    coordinator.endRun();
+    assert.strictEqual(coordinator.hasModelContent(), false);
+  });
+});
+
+describe('showEnding — backward compatibility without runIndicator', () => {
+  test('showEnding works without runIndicator (state-only mode)', async () => {
+    const clock = createFakeClock();
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: async () => 'text',
+      outputTarget: createFakeOutputTarget(),
+      delay: clock.delay,
+    });
+
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    await coordinator.onModelContent('content');
+
+    const endingPromise = coordinator.showEnding();
+    // Yield to enter the hold period
+    await new Promise(r => setTimeout(r, 0));
+    assert.strictEqual(coordinator.isShowingEnding(), true);
+
+    await clock.advance();
+    const result = await endingPromise;
+    assert.strictEqual(result, true);
+    assert.strictEqual(coordinator.isShowingEnding(), false);
   });
 });

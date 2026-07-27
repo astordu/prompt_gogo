@@ -25,6 +25,8 @@
 const CANCEL_ACCELERATOR = 'Command+Escape';
 
 const LOADING_TEXT = 'Loading\u2026'; // single ellipsis character …
+const ENDING_TEXT = 'Ending\u2026';   // single ellipsis character …
+const ENDING_HOLD_MS = 500;
 
 /**
  * @typedef {Object} CancelRegistrar
@@ -77,6 +79,16 @@ class RunCoordinator {
     this._loadingOriginalText = null;
     /** @type {AbortController|null} */
     this._abortController = null;
+    /** @type {boolean} */
+    this._endingActive = false;
+    /**
+     * Injectable delay function (defaults to setTimeout-based promise).
+     * Tests pass a fake clock to control the exact 500ms hold.
+     * @type {(ms: number) => Promise<void>}
+     */
+    this._delay = opts.delay || ((ms) => new Promise(r => setTimeout(r, ms)));
+    /** @type {boolean} */
+    this._hasModelContent = false;
   }
 
   // ------------------------------------------------------------------
@@ -132,6 +144,22 @@ class RunCoordinator {
    */
   getAbortSignal() {
     return this._abortController ? this._abortController.signal : null;
+  }
+
+  /**
+   * Whether the Ending indicator is currently displayed.
+   * @returns {boolean}
+   */
+  isShowingEnding() {
+    return this._endingActive;
+  }
+
+  /**
+   * Whether any non-empty model content has been received during this Run.
+   * @returns {boolean}
+   */
+  hasModelContent() {
+    return this._hasModelContent;
   }
 
   // ------------------------------------------------------------------
@@ -272,6 +300,9 @@ class RunCoordinator {
     if (!chunk) return false; // empty content doesn't end Loading
     if (this._cancelled) return false;
 
+    // Track that we've received non-empty model content
+    this._hasModelContent = true;
+
     // Remove Loading… before writing the real content
     if (!this.validateTarget()) return false;
 
@@ -310,6 +341,86 @@ class RunCoordinator {
     }
 
     this._loadingActive = false;
+    return true;
+  }
+
+  // ------------------------------------------------------------------
+  // Ending indicator lifecycle
+  // ------------------------------------------------------------------
+
+  /**
+   * Show the `Ending…` indicator after normal stream completion.
+   *
+   * Writes `Ending…` after the last model content, then holds for
+   * exactly 500ms before removing it. The Run remains active during
+   * the hold period.
+   *
+   * Pre-conditions:
+   * - The Run is active and not cancelled.
+   * - The stream completed normally (not an error).
+   * - Non-empty model content was received (`_hasModelContent`).
+   * - The Output Target is still valid.
+   *
+   * If cancelled during the 500ms hold, the `Ending…` is removed
+   * immediately and the Run completes as successful (no cancel
+   * notification).
+   *
+   * @returns {Promise<boolean>} true if Ending was shown and held
+   *   for the full duration (or cancelled during hold), false if
+   *   pre-conditions were not met.
+   */
+  async showEnding() {
+    if (!this._active) return false;
+    if (this._cancelled) return false;
+    if (!this._hasModelContent) return false;
+    if (!this.validateTarget()) return false;
+
+    // Write Ending…
+    if (this._runIndicator) {
+      await this._runIndicator.write(ENDING_TEXT);
+    }
+
+    // Re-check after async write
+    if (this._cancelled) {
+      // Cancelled during write — remove Ending… immediately (if target valid)
+      if (this.validateTarget() && this._runIndicator) {
+        await this._runIndicator.deleteBack(ENDING_TEXT.length);
+      }
+      return false;
+    }
+    if (this._checkTargetInvalidated()) {
+      // Target invalid — Ending… may be in the old target; can't clean up
+      this._endingActive = false;
+      return false;
+    }
+
+    this._endingActive = true;
+
+    // Hold for 500ms — cancellation or target invalidity can interrupt
+    await this._delay(ENDING_HOLD_MS);
+
+    // If cancelled during the hold, remove Ending… immediately and
+    // treat as successful completion (no cancel notification).
+    if (this._cancelled) {
+      if (this.validateTarget() && this._runIndicator) {
+        await this._runIndicator.deleteBack(ENDING_TEXT.length);
+      }
+      this._endingActive = false;
+      return true;
+    }
+
+    // Normal completion: remove Ending… after the hold
+    if (!this.validateTarget()) {
+      // Target became invalid during the hold — can't clean up
+      this._endingActive = false;
+      return false;
+    }
+
+    if (this._runIndicator) {
+      await this._runIndicator.deleteBack(ENDING_TEXT.length);
+    }
+
+    this._endingActive = false;
     return true;
   }
 
@@ -364,6 +475,8 @@ class RunCoordinator {
     this._loadingActive = false;
     this._loadingOriginalText = null;
     this._abortController = null;
+    this._endingActive = false;
+    this._hasModelContent = false;
   }
 
   // ------------------------------------------------------------------
@@ -390,4 +503,4 @@ class RunCoordinator {
   }
 }
 
-module.exports = { RunCoordinator, CANCEL_ACCELERATOR, LOADING_TEXT };
+module.exports = { RunCoordinator, CANCEL_ACCELERATOR, LOADING_TEXT, ENDING_TEXT, ENDING_HOLD_MS };
