@@ -236,6 +236,44 @@ function createChip(varName) {
   return chip;
 }
 
+function restoreVariableChipBeforeCaret() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return false;
+
+  const range = sel.getRangeAt(0);
+
+  let previousNode = null;
+  if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset === 0) {
+    previousNode = range.startContainer.previousSibling;
+  } else if (range.startContainer.nodeType === Node.ELEMENT_NODE && range.startOffset > 0) {
+    previousNode = range.startContainer.childNodes[range.startOffset - 1];
+  }
+
+  if (
+    !previousNode ||
+    previousNode.nodeType !== Node.ELEMENT_NODE ||
+    !previousNode.dataset ||
+    previousNode.dataset.variable === undefined
+  ) {
+    return false;
+  }
+
+  const variableText = document.createTextNode(
+    '@' + previousNode.dataset.variable
+  );
+  previousNode.parentNode.replaceChild(variableText, previousNode);
+
+  if (range.collapsed) {
+    const afterVariableText = document.createRange();
+    afterVariableText.setStart(variableText, variableText.textContent.length);
+    afterVariableText.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(afterVariableText);
+  }
+  hideCompletionMenu();
+  return true;
+}
+
 function setTemplateEditor(text) {
   promptTemplateInput.innerHTML = '';
   const nodes = templateModule.parseTemplate(text);
@@ -246,6 +284,10 @@ function setTemplateEditor(text) {
       promptTemplateInput.appendChild(createChip(node.value));
     }
   }
+}
+
+function isTemplateBlockElement(element) {
+  return element.tagName === 'DIV' || element.tagName === 'P';
 }
 
 function domToNodes(element) {
@@ -259,7 +301,7 @@ function domToNodes(element) {
       } else if (child.tagName === 'BR') {
         nodes.push({ type: 'text', value: '\n' });
       } else {
-        const isBlock = child.tagName === 'DIV' || child.tagName === 'P';
+        const isBlock = isTemplateBlockElement(child);
         if (isBlock && nodes.length > 0) {
           const last = nodes[nodes.length - 1];
           if (!(last.type === 'text' && last.value.endsWith('\n'))) {
@@ -271,6 +313,40 @@ function domToNodes(element) {
     }
   }
   return nodes;
+}
+
+function getFirstTemplateCharacter(node) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent.charAt(0);
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  if (node.dataset && node.dataset.variable !== undefined) return '@';
+  if (node.tagName === 'BR' || isTemplateBlockElement(node)) return '\n';
+
+  for (const child of node.childNodes) {
+    const character = getFirstTemplateCharacter(child);
+    if (character) return character;
+  }
+  return '';
+}
+
+function getNextTemplateCharacter(node, offset) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const characterInNode = node.textContent.charAt(offset);
+    if (characterInNode) return characterInNode;
+  }
+
+  let current = node;
+  while (current && current !== promptTemplateInput) {
+    let sibling = current.nextSibling;
+    while (sibling) {
+      const character = getFirstTemplateCharacter(sibling);
+      if (character) return character;
+      sibling = sibling.nextSibling;
+    }
+    current = current.parentNode;
+  }
+  return '';
 }
 
 function getTemplateText() {
@@ -313,6 +389,9 @@ function handlePaste(e) {
   e.preventDefault();
   const text = e.clipboardData.getData('text/plain');
   if (!text) return;
+  if (/^[a-zA-Z0-9]/.test(text)) {
+    restoreVariableChipBeforeCaret();
+  }
   const nodes = templateModule.parseTemplate(text);
   insertNodesAtCaret(nodes);
 }
@@ -526,9 +605,17 @@ function confirmSelection(varName) {
   const chip = createChip(varName);
   range.insertNode(chip);
 
-  // Move caret after chip
+  // Keep the caret in an editable text node after the atomic chip. A caret
+  // placed directly on the contenteditable=false boundary can make Chromium
+  // draw a second selection outline when the user types the next character.
+  let textAfterChip = chip.nextSibling;
+  if (!textAfterChip || textAfterChip.nodeType !== Node.TEXT_NODE) {
+    textAfterChip = document.createTextNode('');
+    chip.parentNode.insertBefore(textAfterChip, chip.nextSibling);
+  }
+
   const after = document.createRange();
-  after.setStartAfter(chip);
+  after.setStart(textAfterChip, 0);
   after.collapse(true);
   sel.removeAllRanges();
   sel.addRange(after);
@@ -543,6 +630,22 @@ function handleCompletionInput() {
     return;
   }
 
+  const nextCharacter = getNextTemplateCharacter(
+    info.node,
+    window.getSelection().getRangeAt(0).startOffset
+  );
+
+  // A complete variable at the caret is already unambiguous. Commit it now
+  // instead of waiting for a following space/punctuation to close the menu;
+  // the delimiter must not be what changes the chip's visual state.
+  const exactMatch = templateModule.VARIABLES.find(
+    variable => variable.name === info.query
+  );
+  if (exactMatch && !/[a-zA-Z0-9]/.test(nextCharacter)) {
+    confirmSelection(exactMatch.name);
+    return;
+  }
+
   // Get bounding rect of the @ character for menu positioning
   const { node, offset } = info;
   const range = document.createRange();
@@ -554,6 +657,15 @@ function handleCompletionInput() {
 
   showCompletionMenu(anchorRect, info.query);
 }
+
+promptTemplateInput.addEventListener('beforeinput', (e) => {
+  // If an ASCII letter/digit immediately extends an already-committed chip,
+  // turn the chip back into text before the browser inserts that character.
+  // This preserves the parser's word-boundary rule: @select_contentX is text,
+  // while @select_content followed by whitespace/punctuation stays a chip.
+  if (typeof e.data !== 'string' || !/^[a-zA-Z0-9]/.test(e.data)) return;
+  restoreVariableChipBeforeCaret();
+});
 
 promptTemplateInput.addEventListener('keydown', (e) => {
   if (!menuVisible) return;
