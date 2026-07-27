@@ -9,17 +9,23 @@ const { ShortcutDraft, isValidShortcutFormat } = require('../src/shortcut-draft'
 // ---------------------------------------------------------------------------
 
 /**
- * Creates an in-memory adapter whose checkAvailability and recommendShortcut
- * can be controlled per-accelerator. Records all calls for assertion.
+ * Creates an in-memory adapter whose checkAvailability, recommendShortcut,
+ * saveShortcut and getConfig can be controlled. Records all calls for assertion.
  *
  * @param {Object} [responses] — map accelerator → result status object
  * @param {Object} [recommendations] — map accelerator → { accelerator } | null
+ * @param {Object} [opts] — { saveResult: Object, config: Object }
  */
-function createMemoryAdapter(responses, recommendations) {
+function createMemoryAdapter(responses, recommendations, opts) {
   const map = responses || {};
   const recMap = recommendations || {};
+  const options = opts || {};
   const calls = [];
   const recCalls = [];
+  const saveCalls = [];
+  const configCalls = [];
+  let saveResult = options.saveResult || { success: true };
+  let configData = options.config || { shortcuts: [], providers: [] };
 
   return {
     checkAvailability(accelerator, excludeId) {
@@ -47,13 +53,35 @@ function createMemoryAdapter(responses, recommendations) {
       }
       return Promise.resolve({ accelerator: 'Control+Alt+R' });
     },
+    saveShortcut(shortcut) {
+      saveCalls.push({ ...shortcut });
+      if (saveResult === 'reject') {
+        return Promise.reject(new Error('simulated'));
+      }
+      return Promise.resolve(saveResult);
+    },
+    getConfig() {
+      configCalls.push({ time: configCalls.length });
+      if (configData === 'reject') {
+        return Promise.reject(new Error('simulated'));
+      }
+      return Promise.resolve(configData);
+    },
     _calls: calls,
     _recCalls: recCalls,
+    _saveCalls: saveCalls,
+    _configCalls: configCalls,
     _set(accelerator, result) {
       map[accelerator] = result;
     },
     _setRec(accelerator, result) {
       recMap[accelerator] = result;
+    },
+    _setSaveResult(result) {
+      saveResult = result;
+    },
+    _setConfig(data) {
+      configData = data;
     },
     _clear() {
       calls.length = 0;
@@ -740,5 +768,457 @@ describe('ShortcutDraft — recommendation stale invalidation', () => {
 
     assert.strictEqual(draft.getSnapshot().status, 'available');
     assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Save — validation
+// ---------------------------------------------------------------------------
+
+describe('ShortcutDraft — save validation', () => {
+  test('missing name prevents save and returns missing-name', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+    // name left empty
+
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().status, 'missing-name');
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+
+  test('missing shortcut prevents save and returns missing-shortcut', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+    // accelerator left empty
+
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().status, 'missing-shortcut');
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+
+  test('invalid shortcut format prevents save and returns invalid', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control'); // invalid format
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().status, 'invalid');
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+
+  test('template without variable prevents save and returns invalid-template', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('没有变量的模板');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().status, 'invalid-template');
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+
+  test('empty template prevents save and returns invalid-template', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setProviderId('prov-1');
+    // template left empty
+
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().status, 'invalid-template');
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+
+  test('missing provider prevents save and returns missing-provider', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    // provider left null
+
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().status, 'missing-provider');
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+
+  test('save when session is closed is a no-op', () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    // session not started
+    draft.save();
+    assert.strictEqual(adapter._saveCalls.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Save — success
+// ---------------------------------------------------------------------------
+
+describe('ShortcutDraft — save success', () => {
+  test('successful save reads authoritative config and closes session', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: { success: true },
+      config: {
+        shortcuts: [{ id: 'sc-1', name: '测试', shortcut: 'Control+Alt+A', inactive: false }],
+        providers: [{ id: 'prov-1', name: 'OpenAI' }],
+      },
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    assert.strictEqual(draft.getSnapshot().status, 'saving');
+    assert.strictEqual(draft.getSnapshot().saving, true);
+
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'saved');
+    assert.strictEqual(snap.saving, false);
+    assert.strictEqual(snap.open, false);
+    assert.ok(snap.savedSnapshot !== null);
+    assert.strictEqual(snap.savedSnapshot.shortcuts.length, 1);
+    assert.strictEqual(snap.savedSnapshot.shortcuts[0].name, '测试');
+    assert.strictEqual(adapter._saveCalls.length, 1);
+    assert.strictEqual(adapter._configCalls.length, 1);
+  });
+
+  test('save passes shortcut object with all fields', async () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('整理');
+    draft.setAccelerator('Control+Alt+9');
+    draft.setTemplate('请整理：@select_content');
+    draft.setProviderId('prov-2');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(adapter._saveCalls[0].name, '整理');
+    assert.strictEqual(adapter._saveCalls[0].shortcut, 'Control+Alt+9');
+    assert.strictEqual(adapter._saveCalls[0].template, '请整理：@select_content');
+    assert.strictEqual(adapter._saveCalls[0].providerId, 'prov-2');
+  });
+
+  test('save in edit mode passes existing id', async () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startEdit({
+      id: 'sc-42',
+      name: '原有',
+      shortcut: 'Control+Alt+8',
+      template: '处理 @select_content',
+      providerId: 'prov-1',
+    });
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(adapter._saveCalls[0].id, 'sc-42');
+  });
+
+  test('save does not perform an independent availability check', async () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    // Wait for the setAccelerator check to complete, then clear call log
+    await new Promise(r => setTimeout(r, 0));
+    adapter._clear();
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    // save() should not call checkAvailability — only saveShortcut + getConfig
+    assert.strictEqual(adapter._calls.length, 0);
+    assert.strictEqual(adapter._saveCalls.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Save — duplicate submission prevention
+// ---------------------------------------------------------------------------
+
+describe('ShortcutDraft — save duplicate prevention', () => {
+  test('duplicate save calls during saving are ignored', async () => {
+    let resolveSave;
+    const adapter = {
+      checkAvailability: () => Promise.resolve({ status: 'available' }),
+      recommendShortcut: () => Promise.resolve(null),
+      saveShortcut: () => new Promise(resolve => { resolveSave = resolve; }),
+      getConfig: () => Promise.resolve({ shortcuts: [], providers: [] }),
+    };
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    assert.strictEqual(draft.getSnapshot().saving, true);
+
+    // Attempt duplicate save — should be ignored
+    draft.save();
+
+    assert.strictEqual(draft.getSnapshot().saving, true);
+
+    // Resolve the first save
+    resolveSave({ success: true });
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().status, 'saved');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Save — failure mapping
+// ---------------------------------------------------------------------------
+
+describe('ShortcutDraft — save failure', () => {
+  test('save failure with invalid reason preserves draft', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: { success: false, reason: 'invalid' },
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'invalid');
+    assert.strictEqual(snap.saveFailureReason, 'invalid');
+    // Draft is preserved
+    assert.strictEqual(snap.open, true);
+    assert.strictEqual(snap.name, '测试');
+    assert.strictEqual(snap.accelerator, 'Control+Alt+A');
+    assert.strictEqual(snap.saving, false);
+  });
+
+  test('save failure with internal-conflict preserves draft', async () => {
+    const adapter = createMemoryAdapter(
+      {},
+      { 'Control+Alt+A': { accelerator: 'Control+Alt+Z' } },
+      { saveResult: { success: false, reason: 'internal-conflict' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'internal-conflict');
+    assert.strictEqual(snap.saveFailureReason, 'internal-conflict');
+    assert.strictEqual(snap.open, true);
+    assert.strictEqual(snap.name, '测试');
+  });
+
+  test('save failure with external-conflict preserves draft', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: { success: false, reason: 'external-conflict' },
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'external-conflict');
+    assert.strictEqual(snap.saveFailureReason, 'external-conflict');
+    assert.strictEqual(snap.open, true);
+  });
+
+  test('save failure with unavailable preserves draft', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: { success: false, reason: 'unavailable' },
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'unavailable');
+    assert.strictEqual(snap.saveFailureReason, 'unavailable');
+    assert.strictEqual(snap.open, true);
+  });
+
+  test('save failure with registration-failed returns save-failure status', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: { success: false, reason: 'registration-failed' },
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'save-failure');
+    assert.strictEqual(snap.saveFailureReason, 'registration-failed');
+    assert.strictEqual(snap.open, true);
+    assert.strictEqual(snap.name, '测试');
+  });
+
+  test('save adapter rejection maps to save-failure', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: 'reject',
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'save-failure');
+    assert.strictEqual(snap.saveFailureReason, 'registration-failed');
+    assert.strictEqual(snap.open, true);
+  });
+
+  test('failed save can be retried after modifying fields', async () => {
+    const adapter = createMemoryAdapter({}, {}, {
+      saveResult: { success: false, reason: 'registration-failed' },
+    });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+    assert.strictEqual(draft.getSnapshot().status, 'save-failure');
+
+    // Modify a field to clear failure, then retry
+    adapter._setSaveResult({ success: true });
+    adapter._setConfig({ shortcuts: [], providers: [] });
+    draft.setName('测试改');
+    draft.save();
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().status, 'saved');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Save — stale result rejection
+// ---------------------------------------------------------------------------
+
+describe('ShortcutDraft — save stale rejection', () => {
+  test('close invalidates in-flight save result', async () => {
+    let resolveSave;
+    const adapter = {
+      checkAvailability: () => Promise.resolve({ status: 'available' }),
+      recommendShortcut: () => Promise.resolve(null),
+      saveShortcut: () => new Promise(resolve => { resolveSave = resolve; }),
+      getConfig: () => Promise.resolve({ shortcuts: [], providers: [] }),
+    };
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    draft.close();
+
+    // Now resolve the save — should be ignored
+    resolveSave({ success: true });
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().status, 'idle');
+    assert.strictEqual(draft.getSnapshot().open, false);
+    assert.strictEqual(draft.getSnapshot().savedSnapshot, null);
+  });
+
+  test('new session invalidates in-flight save result', async () => {
+    let resolveSave;
+    const adapter = {
+      checkAvailability: () => Promise.resolve({ status: 'available' }),
+      recommendShortcut: () => Promise.resolve(null),
+      saveShortcut: () => new Promise(resolve => { resolveSave = resolve; }),
+      getConfig: () => Promise.resolve({ shortcuts: [], providers: [] }),
+    };
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('测试');
+    draft.setAccelerator('Control+Alt+A');
+    draft.setTemplate('处理 @select_content');
+    draft.setProviderId('prov-1');
+
+    draft.save();
+    draft.startAdd();
+
+    resolveSave({ success: true });
+    await new Promise(r => setTimeout(r, 0));
+
+    // New session should be idle, save result ignored
+    assert.strictEqual(draft.getSnapshot().status, 'idle');
+    assert.strictEqual(draft.getSnapshot().savedSnapshot, null);
   });
 });
