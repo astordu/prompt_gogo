@@ -416,6 +416,11 @@ function convertTextNodesToChips() {
   const textNodes = [];
   let node;
   while ((node = walker.nextNode())) {
+    // A chip's label is display-only. Re-processing it would wrap the
+    // existing chip in another chip on every subsequent input event.
+    if (node.parentElement && node.parentElement.closest('.template-chip')) {
+      continue;
+    }
     textNodes.push(node);
   }
 
