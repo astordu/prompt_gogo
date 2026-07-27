@@ -13,6 +13,7 @@
 /**
  * @typedef {Object} DraftAdapter
  * @property {(accelerator: string, excludeId: string | null) => Promise<{ status: string, conflictWith?: string }>} checkAvailability
+ * @property {(accelerator: string, excludeId: string | null, shortcutName: string | null) => Promise<{ accelerator: string } | null>} recommendShortcut
  *
  * The seam the module depends on. The production adapter bridges to
  * ShortcutService via Electron IPC; the test adapter is in-memory.
@@ -39,6 +40,7 @@
  *   - 'external-conflict' — conflict with OS / other app
  *   - 'unavailable' — check could not be completed
  * @property {string | null} conflictWith — name of conflicting shortcut (internal-conflict only)
+ * @property {string | null} recommendation — recommended accelerator available for adoption (conflict states only)
  * @property {boolean} open — whether the session is active
  */
 
@@ -70,6 +72,7 @@ class ShortcutDraft {
     this._providerId = null;
     this._status = 'idle';
     this._conflictWith = null;
+    this._recommendation = null;
     this._generation = 0;
     /** @type {Array<(snapshot: DraftSnapshot) => void>} */
     this._listeners = [];
@@ -91,6 +94,7 @@ class ShortcutDraft {
     this._providerId = null;
     this._status = 'idle';
     this._conflictWith = null;
+    this._recommendation = null;
     this._generation++;
     this._emit();
   }
@@ -108,6 +112,7 @@ class ShortcutDraft {
     this._providerId = shortcut.providerId || null;
     this._status = 'idle';
     this._conflictWith = null;
+    this._recommendation = null;
     this._generation++;
     this._emit();
   }
@@ -124,6 +129,7 @@ class ShortcutDraft {
     this._providerId = null;
     this._status = 'idle';
     this._conflictWith = null;
+    this._recommendation = null;
     this._generation++;
     this._emit();
   }
@@ -151,6 +157,7 @@ class ShortcutDraft {
     if (!this._open) return;
     this._accelerator = accelerator || '';
     this._conflictWith = null;
+    this._recommendation = null;
 
     // Invalid or incomplete format — no adapter call needed
     if (!isValidShortcutFormat(this._accelerator)) {
@@ -172,12 +179,13 @@ class ShortcutDraft {
       .checkAvailability(acc, excludeId)
       .then(result => {
         if (gen !== this._generation || !this._open) return;
-        this._applyCheckResult(result);
+        this._applyCheckResult(result, gen);
       })
       .catch(() => {
         if (gen !== this._generation || !this._open) return;
         this._status = 'unavailable';
         this._conflictWith = null;
+        this._recommendation = null;
         this._emit();
       });
   }
@@ -200,6 +208,53 @@ class ShortcutDraft {
     this._emit();
   }
 
+  /**
+   * Adopt the current recommendation. Re-checks the recommended accelerator
+   * before applying. Only updates the draft if the re-check returns available.
+   * If the recommendation has become stale (conflict / unavailable / invalid),
+   * the current draft is preserved and the status reflects the re-check result.
+   */
+  adoptRecommendation() {
+    if (!this._open || !this._recommendation) return;
+
+    const recommended = this._recommendation;
+    const excludeId = this._id;
+
+    // Clear recommendation immediately; re-check will determine next state
+    this._recommendation = null;
+    this._status = 'checking';
+    const gen = ++this._generation;
+
+    this._emit();
+
+    this._adapter
+      .checkAvailability(recommended, excludeId)
+      .then(result => {
+        if (gen !== this._generation || !this._open) return;
+
+        if (result && result.status === 'available') {
+          // Adopt: update the draft accelerator to the recommended one
+          this._accelerator = recommended;
+          this._status = 'available';
+          this._conflictWith = null;
+          this._recommendation = null;
+          this._emit();
+        } else {
+          // Recommendation is no longer available — apply the re-check result
+          // which may be a new conflict (triggering a new recommendation),
+          // unavailable, or invalid
+          this._applyCheckResult(result, gen);
+        }
+      })
+      .catch(() => {
+        if (gen !== this._generation || !this._open) return;
+        this._status = 'unavailable';
+        this._conflictWith = null;
+        this._recommendation = null;
+        this._emit();
+      });
+  }
+
   // ------------------------------------------------------------------
   // Query
   // ------------------------------------------------------------------
@@ -217,6 +272,7 @@ class ShortcutDraft {
       providerId: this._providerId,
       status: this._status,
       conflictWith: this._conflictWith,
+      recommendation: this._recommendation,
       open: this._open,
     };
   }
@@ -241,17 +297,64 @@ class ShortcutDraft {
   /**
    * Apply the result of an availability check to the current state.
    * Only called when the result is from the current generation.
+   * If the result is a conflict, triggers a recommendation request.
+   * @param {Object} result
+   * @param {number} gen — the generation of the check that produced this result
    * @private
    */
-  _applyCheckResult(result) {
+  _applyCheckResult(result, gen) {
     if (!result || typeof result.status !== 'string') {
       this._status = 'unavailable';
       this._conflictWith = null;
+      this._recommendation = null;
     } else {
       this._status = result.status;
       this._conflictWith = result.conflictWith || null;
     }
-    this._emit();
+
+    // Request recommendation only for conflict states
+    if (this._status === 'internal-conflict' || this._status === 'external-conflict') {
+      this._requestRecommendation(gen);
+      // Emit immediately with conflict status; recommendation arrives async
+      this._emit();
+    } else {
+      this._recommendation = null;
+      this._emit();
+    }
+  }
+
+  /**
+   * Request a recommendation from the adapter. Uses the same generation
+   * mechanism so stale recommendations are discarded.
+   * @param {number} _gen — the generation of the check that triggered this rec
+   * @private
+   */
+  _requestRecommendation(_gen) {
+    const acc = this._accelerator;
+    const excludeId = this._id;
+    const shortcutName = this._name || null;
+
+    // Bump generation so the recommendation has its own token; any
+    // subsequent setAccelerator / session change will bump again and
+    // invalidate this pending recommendation.
+    const recGen = ++this._generation;
+
+    this._adapter
+      .recommendShortcut(acc, excludeId, shortcutName)
+      .then(rec => {
+        if (recGen !== this._generation || !this._open) return;
+        // Only apply if still in conflict state for the same accelerator
+        if (this._accelerator !== acc) return;
+        if (this._status !== 'internal-conflict' && this._status !== 'external-conflict') return;
+
+        this._recommendation = rec && rec.accelerator ? rec.accelerator : null;
+        this._emit();
+      })
+      .catch(() => {
+        if (recGen !== this._generation || !this._open) return;
+        this._recommendation = null;
+        this._emit();
+      });
   }
 
   /**

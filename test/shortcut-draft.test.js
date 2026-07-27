@@ -9,14 +9,17 @@ const { ShortcutDraft, isValidShortcutFormat } = require('../src/shortcut-draft'
 // ---------------------------------------------------------------------------
 
 /**
- * Creates an in-memory adapter whose checkAvailability can be controlled
- * per-accelerator. Records all calls for assertion.
+ * Creates an in-memory adapter whose checkAvailability and recommendShortcut
+ * can be controlled per-accelerator. Records all calls for assertion.
  *
  * @param {Object} [responses] — map accelerator → result status object
+ * @param {Object} [recommendations] — map accelerator → { accelerator } | null
  */
-function createMemoryAdapter(responses) {
+function createMemoryAdapter(responses, recommendations) {
   const map = responses || {};
+  const recMap = recommendations || {};
   const calls = [];
+  const recCalls = [];
 
   return {
     checkAvailability(accelerator, excludeId) {
@@ -33,9 +36,24 @@ function createMemoryAdapter(responses) {
       }
       return Promise.resolve({ status: 'available' });
     },
+    recommendShortcut(accelerator, excludeId, shortcutName) {
+      recCalls.push({ accelerator, excludeId, shortcutName, time: recCalls.length });
+      const r = recMap[accelerator];
+      if (r === 'reject') {
+        return Promise.reject(new Error('simulated'));
+      }
+      if (typeof r === 'object' || r === null) {
+        return Promise.resolve(r);
+      }
+      return Promise.resolve({ accelerator: 'Control+Alt+R' });
+    },
     _calls: calls,
+    _recCalls: recCalls,
     _set(accelerator, result) {
       map[accelerator] = result;
+    },
+    _setRec(accelerator, result) {
+      recMap[accelerator] = result;
     },
     _clear() {
       calls.length = 0;
@@ -379,5 +397,348 @@ describe('ShortcutDraft — accelerator transition to invalid then valid', () =>
     draft.setAccelerator('Control');
     assert.strictEqual(draft.getSnapshot().status, 'invalid');
     assert.strictEqual(adapter._calls.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recommendation — display, adopt, stale, invalidation
+// ---------------------------------------------------------------------------
+
+describe('ShortcutDraft — recommendation display', () => {
+  test('internal-conflict triggers recommendation request', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' } },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'internal-conflict');
+    assert.strictEqual(snap.recommendation, 'Control+Alt+Z');
+    assert.strictEqual(adapter._recCalls.length, 1);
+    assert.strictEqual(adapter._recCalls[0].accelerator, 'Control+Alt+B');
+  });
+
+  test('external-conflict triggers recommendation request', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+C': { status: 'external-conflict' } },
+      { 'Control+Alt+C': { accelerator: 'Control+Alt+Y' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+C');
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'external-conflict');
+    assert.strictEqual(snap.recommendation, 'Control+Alt+Y');
+  });
+
+  test('invalid shortcut does not trigger recommendation', async () => {
+    const adapter = createMemoryAdapter({}, { 'Control': { accelerator: 'Control+Alt+Z' } });
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(adapter._recCalls.length, 0);
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+
+  test('unavailable check does not trigger recommendation', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+D': 'reject' },
+      { 'Control+Alt+D': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+D');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(adapter._recCalls.length, 0);
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+
+  test('recommendation is null when adapter returns null', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' } },
+      { 'Control+Alt+B': null }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+
+  test('recommendation does not auto-apply to draft accelerator', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' } },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    // Draft accelerator must remain unchanged
+    assert.strictEqual(draft.getSnapshot().accelerator, 'Control+Alt+B');
+  });
+
+  test('shortcutName is passed to recommendation', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' } },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+    draft.setName('整理文本');
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(adapter._recCalls[0].shortcutName, '整理文本');
+  });
+});
+
+describe('ShortcutDraft — adopt recommendation', () => {
+  test('adopt with available re-check updates draft', async () => {
+    const adapter = createMemoryAdapter(
+      {
+        'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' },
+        'Control+Alt+Z': 'resolve',
+      },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().recommendation, 'Control+Alt+Z');
+
+    draft.adoptRecommendation();
+    assert.strictEqual(draft.getSnapshot().status, 'checking');
+
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'available');
+    assert.strictEqual(snap.accelerator, 'Control+Alt+Z');
+    assert.strictEqual(snap.recommendation, null);
+  });
+
+  test('adopt when recommendation has become conflict does not update draft', async () => {
+    const adapter = createMemoryAdapter(
+      {
+        'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' },
+        'Control+Alt+Z': { status: 'internal-conflict', conflictWith: '新冲突' },
+      },
+      {
+        'Control+Alt+B': { accelerator: 'Control+Alt+Z' },
+        'Control+Alt+Z': { accelerator: 'Control+Alt+X' },
+      }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    // Original draft accelerator
+    assert.strictEqual(draft.getSnapshot().accelerator, 'Control+Alt+B');
+
+    draft.adoptRecommendation();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    // Draft accelerator should NOT have been updated
+    assert.strictEqual(snap.accelerator, 'Control+Alt+B');
+    // Status should reflect the new conflict
+    assert.strictEqual(snap.status, 'internal-conflict');
+  });
+
+  test('adopt when recommendation has become unavailable', async () => {
+    const adapter = createMemoryAdapter(
+      {
+        'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' },
+        'Control+Alt+Z': 'reject',
+      },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    draft.adoptRecommendation();
+    await new Promise(r => setTimeout(r, 0));
+
+    const snap = draft.getSnapshot();
+    assert.strictEqual(snap.status, 'unavailable');
+    assert.strictEqual(snap.accelerator, 'Control+Alt+B');
+  });
+
+  test('adopt when no recommendation is a no-op', async () => {
+    const adapter = createMemoryAdapter();
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    // Should not throw
+    draft.adoptRecommendation();
+    assert.strictEqual(draft.getSnapshot().status, 'idle');
+  });
+
+  test('adopt when session closed is a no-op', async () => {
+    const adapter = createMemoryAdapter(
+      {
+        'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' },
+        'Control+Alt+Z': 'resolve',
+      },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    draft.close();
+    draft.adoptRecommendation();
+
+    assert.strictEqual(draft.getSnapshot().open, false);
+    assert.strictEqual(draft.getSnapshot().status, 'idle');
+  });
+});
+
+describe('ShortcutDraft — recommendation stale invalidation', () => {
+  test('stale recommendation does not overwrite newer state', async () => {
+    // First accelerator conflicts (triggers slow recommendation),
+    // second accelerator is available (fast check)
+    const adapter = {
+      checkAvailability(accelerator) {
+        if (accelerator === 'Control+Alt+1') {
+          return Promise.resolve({ status: 'internal-conflict', conflictWith: 'OLD' });
+        }
+        return Promise.resolve({ status: 'available' });
+      },
+      recommendShortcut(accelerator) {
+        if (accelerator === 'Control+Alt+1') {
+          return new Promise(resolve => {
+            setTimeout(() => resolve({ accelerator: 'Control+Alt+Z' }), 50);
+          });
+        }
+        return Promise.resolve(null);
+      },
+    };
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+1');
+    // Immediately switch to a new accelerator
+    draft.setAccelerator('Control+Alt+2');
+
+    await new Promise(r => setTimeout(r, 100));
+
+    // The stale recommendation from Control+Alt+1 must NOT appear
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+    assert.strictEqual(draft.getSnapshot().status, 'available');
+    assert.strictEqual(draft.getSnapshot().accelerator, 'Control+Alt+2');
+  });
+
+  test('close invalidates pending recommendation', async () => {
+    const adapter = {
+      checkAvailability() {
+        return Promise.resolve({ status: 'internal-conflict', conflictWith: 'X' });
+      },
+      recommendShortcut() {
+        return new Promise(resolve => {
+          setTimeout(() => resolve({ accelerator: 'Control+Alt+Z' }), 50);
+        });
+      },
+    };
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    draft.close();
+
+    await new Promise(r => setTimeout(r, 100));
+
+    assert.strictEqual(draft.getSnapshot().open, false);
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+
+  test('new session invalidates pending recommendation', async () => {
+    const adapter = {
+      checkAvailability() {
+        return Promise.resolve({ status: 'internal-conflict', conflictWith: 'X' });
+      },
+      recommendShortcut() {
+        return new Promise(resolve => {
+          setTimeout(() => resolve({ accelerator: 'Control+Alt+Z' }), 50);
+        });
+      },
+    };
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    draft.startAdd();
+
+    await new Promise(r => setTimeout(r, 100));
+
+    assert.strictEqual(draft.getSnapshot().status, 'idle');
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+
+  test('recommendation request failure leaves recommendation null', async () => {
+    const adapter = createMemoryAdapter(
+      { 'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' } },
+      { 'Control+Alt+B': 'reject' }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().status, 'internal-conflict');
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
+  });
+
+  test('recommendation in snapshot is cleared on available status', async () => {
+    const adapter = createMemoryAdapter(
+      {
+        'Control+Alt+B': { status: 'internal-conflict', conflictWith: '已有' },
+        'Control+Alt+A': 'resolve',
+      },
+      { 'Control+Alt+B': { accelerator: 'Control+Alt+Z' } }
+    );
+    const draft = new ShortcutDraft(adapter);
+    draft.startAdd();
+
+    draft.setAccelerator('Control+Alt+B');
+    await new Promise(r => setTimeout(r, 0));
+    assert.ok(draft.getSnapshot().recommendation !== null);
+
+    // Switch to an available accelerator
+    draft.setAccelerator('Control+Alt+A');
+    await new Promise(r => setTimeout(r, 0));
+
+    assert.strictEqual(draft.getSnapshot().status, 'available');
+    assert.strictEqual(draft.getSnapshot().recommendation, null);
   });
 });
