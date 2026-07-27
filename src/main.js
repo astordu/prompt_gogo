@@ -9,6 +9,7 @@ const { buildRequestConfig, validateProviderConfig, migrateToProviders } = requi
 const { ShortcutService, createElectronRegistrar, createElectronStore } = require('./shortcut-service');
 const { RunCoordinator } = require('./run-coordinator');
 const { createOutputTarget } = require('./output-target');
+const { createRunIndicatorSink } = require('./run-indicator');
 
 // Initialize config store
 const store = new Store({
@@ -207,7 +208,7 @@ async function handleShortcutTrigger(shortcutConfig) {
       return;
     }
 
-    await processWithAI(prompt, shortcutConfig);
+    await processWithAI(prompt, shortcutConfig, selectedText);
   } catch (error) {
     console.error('\n❌ 处理失败:', error.message);
   } finally {
@@ -303,7 +304,7 @@ async function fallbackToClipboard() {
   }
 }
 
-async function processWithAI(prompt, shortcutConfig) {
+async function processWithAI(prompt, shortcutConfig, originalSelectedText) {
   const provider = findProvider(shortcutConfig.providerId);
   const actionName = shortcutConfig.name;
 
@@ -324,6 +325,18 @@ async function processWithAI(prompt, shortcutConfig) {
 
   const requestConfig = buildRequestConfig(provider);
 
+  // Show Loading… indicator before sending the request.
+  // This replaces the original selected text with the Run Indicator.
+  const loadingShown = await runCoordinator.showLoading(originalSelectedText || '');
+  if (!loadingShown) {
+    if (runCoordinator.isCancelled()) {
+      showNotification('已取消', '运行任务已取消');
+      return;
+    }
+    // Target invalid notification already sent by validateTarget
+    return;
+  }
+
   console.log(`🔑 Provider: ${provider.name} (${provider.type})`);
   console.log(`🚀 发送流式请求...`);
   console.log(`📝 Prompt 长度: ${prompt.length} 字符`);
@@ -343,6 +356,17 @@ async function processWithAI(prompt, shortcutConfig) {
       responseType: 'stream',
       timeout: 60000
     });
+
+    // Check if cancelled during the HTTP request
+    if (runCoordinator.isCancelled()) {
+      if (runCoordinator.isShowingLoading()) {
+        await runCoordinator.abortLoading();
+      }
+      showNotification('已取消', '运行任务已取消');
+      // Destroy the response stream to stop consuming
+      response.data.destroy();
+      return;
+    }
 
     console.log('✅ 开始接收流式响应...');
     console.log('⌨️ 开始流式输出到光标位置...');
@@ -384,8 +408,27 @@ async function processWithAI(prompt, shortcutConfig) {
     }
 
     const collected = [];
+    let firstContentHandled = false;
     async function* trackedChunks() {
       for await (const chunk of sseTextStream(response.data)) {
+        // If cancelled while Loading is still active, abort
+        if (runCoordinator.isCancelled() && runCoordinator.isShowingLoading()) {
+          await runCoordinator.abortLoading();
+          return;
+        }
+
+        // Handle the Loading indicator transition on first non-empty content
+        if (!firstContentHandled && chunk) {
+          const cleared = await runCoordinator.onModelContent(chunk);
+          if (!cleared) {
+            // Loading was not cleared — either cancelled or target invalid
+            if (runCoordinator.isCancelled()) {
+              await runCoordinator.abortLoading();
+            }
+            return;
+          }
+          firstContentHandled = cleared;
+        }
         collected.push(chunk);
         yield chunk;
       }
@@ -421,7 +464,17 @@ async function processWithAI(prompt, shortcutConfig) {
     if (error.message === 'Output Target invalid') {
       // Target invalid notification already sent by validateTarget
       console.log('\n⚠️ Output Target 已失效，停止写入');
+      // If Loading is still active, try to abort (may fail if target invalid)
+      if (runCoordinator.isShowingLoading()) {
+        await runCoordinator.abortLoading();
+      }
       return;
+    }
+
+    // If we haven't received any model content yet, abort Loading
+    // and restore the original text
+    if (runCoordinator.isShowingLoading()) {
+      await runCoordinator.abortLoading();
     }
     console.error('\n========================================');
     console.error('❌ API 调用失败');
@@ -604,6 +657,7 @@ app.whenReady().then(() => {
     onNotify: (title, body) => showNotification(title, body),
     readSelectedText: () => readSelectedText(),
     outputTarget: createOutputTarget(),
+    runIndicator: createRunIndicatorSink({ clipboard }),
   });
 
   // Create the shortcut management service with injectable dependencies

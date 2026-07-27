@@ -24,6 +24,8 @@
 
 const CANCEL_ACCELERATOR = 'Command+Escape';
 
+const LOADING_TEXT = 'Loading\u2026'; // single ellipsis character …
+
 /**
  * @typedef {Object} CancelRegistrar
  * @property {(accelerator: string, callback: () => void) => boolean} register
@@ -37,11 +39,18 @@ const CANCEL_ACCELERATOR = 'Command+Escape';
  */
 
 /**
+ * @typedef {Object} RunIndicatorSink
+ * @property {(text: string) => Promise<void>} write - Pastes text at cursor position
+ * @property {(count: number) => Promise<void>} deleteBack - Deletes n characters backwards
+ */
+
+/**
  * @typedef {Object} RunCoordinatorOptions
  * @property {CancelRegistrar} cancelRegistrar - Registers/unregisters the Cancel Shortcut
  * @property {(title: string, body: string) => void} onNotify - Sends user-visible notifications
  * @property {() => Promise<string>} readSelectedText - Reads the currently selected text
  * @property {OutputTargetAdapter} [outputTarget] - Captures and validates the Output Target
+ * @property {RunIndicatorSink} [runIndicator] - Writes/removes inline Run Indicators
  */
 
 class RunCoordinator {
@@ -53,6 +62,7 @@ class RunCoordinator {
     this._onNotify = opts.onNotify || (() => {});
     this._readSelectedText = opts.readSelectedText || (async () => '');
     this._outputTarget = opts.outputTarget || null;
+    this._runIndicator = opts.runIndicator || null;
     /** @type {boolean} */
     this._active = false;
     /** @type {boolean} */
@@ -61,6 +71,10 @@ class RunCoordinator {
     this._cancelRegistered = false;
     /** @type {boolean} */
     this._targetInvalid = false;
+    /** @type {boolean} */
+    this._loadingActive = false;
+    /** @type {string|null} */
+    this._loadingOriginalText = null;
   }
 
   // ------------------------------------------------------------------
@@ -98,6 +112,14 @@ class RunCoordinator {
    */
   isViable() {
     return this._active && !this._cancelled && !this._targetInvalid;
+  }
+
+  /**
+   * Whether the Loading indicator is currently displayed.
+   * @returns {boolean}
+   */
+  isShowingLoading() {
+    return this._loadingActive;
   }
 
   // ------------------------------------------------------------------
@@ -178,6 +200,103 @@ class RunCoordinator {
     this._cancelled = true;
   }
 
+  // ------------------------------------------------------------------
+  // Loading indicator lifecycle
+  // ------------------------------------------------------------------
+
+  /**
+   * Show the `Loading…` indicator, replacing the original selected
+   * text. Called after the selected text has been safely captured
+   * and provider/request configuration validation has passed — just
+   * before the HTTP request is sent.
+   *
+   * Validates the Output Target first. If invalid, does nothing and
+   * returns false.
+   *
+   * @param {string} originalText - The originally selected text (for later restore)
+   * @returns {Promise<boolean>} true if Loading was shown, false if target invalid
+   */
+  async showLoading(originalText) {
+    if (!this._active || this._loadingActive) return false;
+    if (this._cancelled) return false;
+    if (!this.validateTarget()) return false;
+
+    this._loadingOriginalText = originalText;
+
+    if (this._runIndicator) {
+      await this._runIndicator.write(LOADING_TEXT);
+    }
+
+    // Re-check target and cancellation after the async write
+    if (this._cancelled) {
+      this._loadingActive = false;
+      return false;
+    }
+    if (this._checkTargetInvalidated()) {
+      this._loadingActive = false;
+      return false;
+    }
+
+    this._loadingActive = true;
+    return true;
+  }
+
+  /**
+   * Handle an incoming model content chunk during the Loading phase.
+   *
+   * If the Loading indicator is active and the chunk is non-empty,
+   * the indicator is removed first. Empty chunks do not trigger
+   * removal.
+   *
+   * @param {string} chunk - The model content chunk
+   * @returns {Promise<boolean>} true if Loading was cleared by this chunk, false otherwise
+   */
+  async onModelContent(chunk) {
+    if (!this._loadingActive) return false;
+    if (!chunk) return false; // empty content doesn't end Loading
+    if (this._cancelled) return false;
+
+    // Remove Loading… before writing the real content
+    if (!this.validateTarget()) return false;
+
+    if (this._runIndicator) {
+      await this._runIndicator.deleteBack(LOADING_TEXT.length);
+    }
+
+    if (this._cancelled) return false;
+    if (this._checkTargetInvalidated()) return false;
+
+    this._loadingActive = false;
+    return true;
+  }
+
+  /**
+   * Abort the Loading phase: remove the `Loading…` indicator and
+   * restore the original selected text. Called when an error or
+   * cancellation occurs before the first model content.
+   *
+   * If the Output Target has become invalid, does NOT touch the new
+   * focus — only notifies.
+   *
+   * @returns {Promise<boolean>} true if restored, false if target invalid or no Loading active
+   */
+  async abortLoading() {
+    if (!this._loadingActive) return false;
+    if (!this.validateTarget()) return false;
+
+    if (this._runIndicator) {
+      // Delete Loading…
+      await this._runIndicator.deleteBack(LOADING_TEXT.length);
+      // Restore original text
+      if (this._loadingOriginalText !== null) {
+        await this._runIndicator.write(this._loadingOriginalText);
+      }
+    }
+
+    this._loadingActive = false;
+    return true;
+  }
+
   /**
    * Check if the Output Target is still valid. If it has become
    * invalid, mark the Run as target-invalid and send a notification.
@@ -226,6 +345,8 @@ class RunCoordinator {
     this._active = false;
     this._cancelled = false;
     this._targetInvalid = false;
+    this._loadingActive = false;
+    this._loadingOriginalText = null;
   }
 
   // ------------------------------------------------------------------
@@ -252,4 +373,4 @@ class RunCoordinator {
   }
 }
 
-module.exports = { RunCoordinator, CANCEL_ACCELERATOR };
+module.exports = { RunCoordinator, CANCEL_ACCELERATOR, LOADING_TEXT };

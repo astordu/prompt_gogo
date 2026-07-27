@@ -122,6 +122,34 @@ function createFakeOutputTarget() {
   };
 }
 
+/**
+ * Creates a fake Run Indicator sink that records all write/deleteBack
+ * calls. Can be configured to fail at specific points.
+ */
+function createFakeRunIndicator() {
+  const operations = [];
+  let failOnDelete = false;
+  let failOnWrite = false;
+
+  return {
+    async write(text) {
+      if (failOnWrite) throw new Error('write failed');
+      operations.push({ type: 'write', text });
+    },
+    async deleteBack(count) {
+      if (failOnDelete) throw new Error('deleteBack failed');
+      operations.push({ type: 'deleteBack', count });
+    },
+    // test helpers
+    _operations() { return operations; },
+    _writes() { return operations.filter(o => o.type === 'write').map(o => o.text); },
+    _deleteCount() { return operations.filter(o => o.type === 'deleteBack').reduce((s, o) => s + o.count, 0); },
+    _clear() { operations.length = 0; },
+    _failOnDelete() { failOnDelete = true; },
+    _failOnWrite() { failOnWrite = true; },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helper to wire up a coordinator with all fakes.
 // ---------------------------------------------------------------------------
@@ -131,15 +159,17 @@ function makeCoordinator(opts = {}) {
   const notifier = opts.notifier || createFakeNotifier();
   const reader = opts.reader || createFakeTextReader(opts.text !== undefined ? opts.text : 'selected text');
   const outputTarget = opts.outputTarget || createFakeOutputTarget();
+  const runIndicator = opts.runIndicator || createFakeRunIndicator();
 
   const coordinator = new RunCoordinator({
     cancelRegistrar: registrar,
     onNotify: (title, body) => notifier.notify(title, body),
     readSelectedText: () => reader.read(),
     outputTarget,
+    runIndicator,
   });
 
-  return { coordinator, registrar, notifier, reader, outputTarget };
+  return { coordinator, registrar, notifier, reader, outputTarget, runIndicator };
 }
 
 // ---------------------------------------------------------------------------
@@ -768,5 +798,425 @@ describe('Output Target — full lifecycle with invalidation', () => {
     assert.strictEqual(coordinator.isTargetInvalid(), false);
     assert.strictEqual(coordinator.validateTarget(), true);
     coordinator.endRun();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — showLoading
+// ---------------------------------------------------------------------------
+
+describe('showLoading — insertion timing', () => {
+  test('writes Loading… with single ellipsis character', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original text');
+    assert.strictEqual(runIndicator._writes().length, 1);
+    assert.strictEqual(runIndicator._writes()[0], 'Loading\u2026');
+  });
+
+  test('isShowingLoading is true after showLoading', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+    await coordinator.showLoading('original');
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+  });
+
+  test('showLoading returns true when successful', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const result = await coordinator.showLoading('original');
+    assert.strictEqual(result, true);
+  });
+
+  test('showLoading does not write when no Run is active', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    const result = await coordinator.showLoading('original');
+    assert.strictEqual(result, false);
+    assert.strictEqual(runIndicator._writes().length, 0);
+  });
+
+  test('showLoading is idempotent (second call does nothing)', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    const second = await coordinator.showLoading('original');
+    assert.strictEqual(second, false);
+    assert.strictEqual(runIndicator._writes().length, 1);
+  });
+
+  test('showLoading returns false when target is invalid', async () => {
+    const { coordinator, outputTarget, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    outputTarget._invalidate();
+    const result = await coordinator.showLoading('original');
+    assert.strictEqual(result, false);
+    assert.strictEqual(runIndicator._writes().length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — cancellation during showLoading
+// ---------------------------------------------------------------------------
+
+describe('showLoading — cancellation', () => {
+  test('showLoading returns false when cancelled before', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    coordinator.cancel();
+    const result = await coordinator.showLoading('original');
+    assert.strictEqual(result, false);
+    assert.strictEqual(runIndicator._writes().length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — first model content replacement
+// ---------------------------------------------------------------------------
+
+describe('onModelContent — first content replaces Loading…', () => {
+  test('non-empty chunk clears Loading and returns true', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    const cleared = await coordinator.onModelContent('Hello');
+    assert.strictEqual(cleared, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+    // Should have deleted exactly LOADING_TEXT.length characters
+    assert.strictEqual(runIndicator._deleteCount(), 'Loading\u2026'.length);
+  });
+
+  test('empty chunk does not clear Loading', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    const cleared = await coordinator.onModelContent('');
+    assert.strictEqual(cleared, false);
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+    assert.strictEqual(runIndicator._deleteCount(), 0);
+  });
+
+  test('null chunk does not clear Loading', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    const cleared = await coordinator.onModelContent(null);
+    assert.strictEqual(cleared, false);
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+  });
+
+  test('second call to onModelContent is a no-op (Loading already cleared)', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+
+    await coordinator.onModelContent('first');
+    const cleared = await coordinator.onModelContent('second');
+    assert.strictEqual(cleared, false);
+    // Only one deleteBack should have happened
+    assert.strictEqual(runIndicator._deleteCount(), 'Loading\u2026'.length);
+  });
+
+  test('onModelContent returns false when Loading not active', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const cleared = await coordinator.onModelContent('text');
+    assert.strictEqual(cleared, false);
+  });
+
+  test('onModelContent returns false when cancelled', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    coordinator.cancel();
+    const cleared = await coordinator.onModelContent('text');
+    assert.strictEqual(cleared, false);
+    assert.strictEqual(runIndicator._deleteCount(), 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — abort and restore
+// ---------------------------------------------------------------------------
+
+describe('abortLoading — removes Loading and restores original text', () => {
+  test('deletes Loading… and writes back original text', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original selected text');
+
+    const restored = await coordinator.abortLoading();
+    assert.strictEqual(restored, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+
+    // Operations: write(Loading…), deleteBack(len), write(original)
+    const ops = runIndicator._operations();
+    assert.strictEqual(ops.length, 3);
+    assert.strictEqual(ops[0].type, 'write');
+    assert.strictEqual(ops[0].text, 'Loading\u2026');
+    assert.strictEqual(ops[1].type, 'deleteBack');
+    assert.strictEqual(ops[2].type, 'write');
+    assert.strictEqual(ops[2].text, 'original selected text');
+  });
+
+  test('abortLoading returns false when no Loading active', async () => {
+    const { coordinator } = makeCoordinator();
+    coordinator.beginRun();
+    const result = await coordinator.abortLoading();
+    assert.strictEqual(result, false);
+  });
+
+  test('abortLoading returns false when target invalid', async () => {
+    const { coordinator, outputTarget, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    outputTarget._invalidate();
+    const result = await coordinator.abortLoading();
+    assert.strictEqual(result, false);
+    // Should NOT have touched the target — no delete/write
+    assert.strictEqual(runIndicator._deleteCount(), 0);
+  });
+
+  test('abortLoading restores empty string when original was empty', async () => {
+    const { coordinator, runIndicator } = makeCoordinator();
+    coordinator.beginRun();
+    await coordinator.showLoading('');
+
+    await coordinator.abortLoading();
+    const ops = runIndicator._operations();
+    // write(Loading…), deleteBack, write('')
+    assert.strictEqual(ops[2].type, 'write');
+    assert.strictEqual(ops[2].text, '');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — target invalidation
+// ---------------------------------------------------------------------------
+
+describe('Loading — target invalidation during showLoading', () => {
+  test('target invalidates during showLoading async write returns false', async () => {
+    const outputTarget = createFakeOutputTarget();
+    const notifier = createFakeNotifier();
+    const runIndicator = createFakeRunIndicator();
+
+    // Custom indicator that invalidates target during write
+    const invalidatingIndicator = {
+      async write(text) {
+        runIndicator._operations().push({ type: 'write', text });
+        outputTarget._invalidate();
+      },
+      async deleteBack(count) {
+        runIndicator._operations().push({ type: 'deleteBack', count });
+      },
+    };
+
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: (t, b) => notifier.notify(t, b),
+      readSelectedText: async () => 'text',
+      outputTarget,
+      runIndicator: invalidatingIndicator,
+    });
+
+    coordinator.beginRun();
+    notifier._clear();
+    const result = await coordinator.showLoading('original');
+    assert.strictEqual(result, false);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+    assert.strictEqual(notifier._count(), 1);
+    assert.ok(notifier._all()[0].title.includes('失效'));
+  });
+});
+
+describe('Loading — target invalidation during onModelContent', () => {
+  test('target invalidates during deleteBack returns false', async () => {
+    const outputTarget = createFakeOutputTarget();
+    const notifier = createFakeNotifier();
+
+    const invalidatingIndicator = {
+      async write(text) { /* ok */ },
+      async deleteBack(count) {
+        outputTarget._invalidate();
+      },
+    };
+
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: (t, b) => notifier.notify(t, b),
+      readSelectedText: async () => 'text',
+      outputTarget,
+      runIndicator: invalidatingIndicator,
+    });
+
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    notifier._clear();
+    const cleared = await coordinator.onModelContent('content');
+    assert.strictEqual(cleared, false);
+    // Loading state persists — cannot clean up because target is invalid
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+    assert.strictEqual(notifier._count(), 1);
+    // endRun clears the loading state
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — full lifecycle
+// ---------------------------------------------------------------------------
+
+describe('Loading — full lifecycle integration', () => {
+  test('show → first content → loading cleared, content flows normally', async () => {
+    const { coordinator, runIndicator } = makeCoordinator({ text: 'selected' });
+    coordinator.beginRun();
+
+    const text = await coordinator.readText();
+    assert.strictEqual(text, 'selected');
+
+    await coordinator.showLoading('selected');
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+
+    // Simulate empty chunk first — should not clear
+    await coordinator.onModelContent('');
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+
+    // Simulate first real content
+    const cleared = await coordinator.onModelContent('Hello world');
+    assert.strictEqual(cleared, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+  });
+
+  test('show → cancel before content → abort restores original', async () => {
+    const { coordinator, runIndicator } = makeCoordinator({ text: 'my text' });
+    coordinator.beginRun();
+    await coordinator.readText();
+    await coordinator.showLoading('my text');
+
+    coordinator.cancel();
+    const cleared = await coordinator.onModelContent('content');
+    assert.strictEqual(cleared, false);
+
+    const restored = await coordinator.abortLoading();
+    assert.strictEqual(restored, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+
+    // Verify original text was restored
+    const ops = runIndicator._operations();
+    const lastWrite = ops.filter(o => o.type === 'write').pop();
+    assert.strictEqual(lastWrite.text, 'my text');
+
+    coordinator.endRun();
+  });
+
+  test('show → error before content → abort restores original', async () => {
+    const { coordinator, runIndicator } = makeCoordinator({ text: 'input' });
+    coordinator.beginRun();
+    await coordinator.readText();
+    await coordinator.showLoading('input');
+
+    // Error occurs — caller calls abortLoading
+    const restored = await coordinator.abortLoading();
+    assert.strictEqual(restored, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+
+    // Verify original text was restored
+    const ops = runIndicator._operations();
+    const lastWrite = ops.filter(o => o.type === 'write').pop();
+    assert.strictEqual(lastWrite.text, 'input');
+
+    coordinator.endRun();
+  });
+
+  test('show → target invalid → no further writes to new focus', async () => {
+    const { coordinator, outputTarget, runIndicator } = makeCoordinator({ text: 'data' });
+    coordinator.beginRun();
+    await coordinator.readText();
+    await coordinator.showLoading('data');
+
+    // Target becomes invalid
+    outputTarget._invalidate();
+
+    // onModelContent should fail without touching the target
+    const cleared = await coordinator.onModelContent('content');
+    assert.strictEqual(cleared, false);
+
+    // abortLoading should also fail
+    const restored = await coordinator.abortLoading();
+    assert.strictEqual(restored, false);
+
+    // No additional deleteBack or write operations beyond the initial Loading write
+    const ops = runIndicator._operations();
+    assert.strictEqual(ops.length, 1); // only the initial Loading write
+    assert.strictEqual(ops[0].type, 'write');
+
+    coordinator.endRun();
+  });
+
+  test('show → endRun clears loading state', async () => {
+    const { coordinator } = makeCoordinator({ text: 'data' });
+    coordinator.beginRun();
+    await coordinator.showLoading('data');
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+
+    coordinator.endRun();
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Loading indicator — backward compatibility (no runIndicator)
+// ---------------------------------------------------------------------------
+
+describe('Loading — backward compatibility without runIndicator', () => {
+  test('showLoading works without runIndicator (no-op writes)', async () => {
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: async () => 'text',
+      outputTarget: createFakeOutputTarget(),
+    });
+
+    coordinator.beginRun();
+    const result = await coordinator.showLoading('original');
+    assert.strictEqual(result, true);
+    assert.strictEqual(coordinator.isShowingLoading(), true);
+  });
+
+  test('onModelContent works without runIndicator', async () => {
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: async () => 'text',
+      outputTarget: createFakeOutputTarget(),
+    });
+
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    const cleared = await coordinator.onModelContent('content');
+    assert.strictEqual(cleared, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
+  });
+
+  test('abortLoading works without runIndicator', async () => {
+    const coordinator = new RunCoordinator({
+      cancelRegistrar: createFakeCancelRegistrar(),
+      onNotify: () => {},
+      readSelectedText: async () => 'text',
+      outputTarget: createFakeOutputTarget(),
+    });
+
+    coordinator.beginRun();
+    await coordinator.showLoading('original');
+    const restored = await coordinator.abortLoading();
+    assert.strictEqual(restored, true);
+    assert.strictEqual(coordinator.isShowingLoading(), false);
   });
 });
