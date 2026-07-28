@@ -603,10 +603,10 @@ function renderMenuItems() {
   completionMenu.innerHTML = filteredVars.map((v, i) => {
     const isHighlighted = i === highlightedIndex;
     const bgClass = isHighlighted
-      ? 'bg-primary/10 dark:bg-primary/20'
+      ? 'bg-background-light dark:bg-background-dark'
       : 'hover:bg-background-light dark:hover:bg-background-dark';
     return `<div class="completion-item ${bgClass}" data-var="${v.name}" data-index="${i}">
-      <span class="completion-item-name text-primary">${v.name}</span>
+      <span class="completion-item-name text-text-primary-light dark:text-text-primary-dark">${v.name}</span>
       <span class="completion-item-desc text-text-secondary-light dark:text-text-secondary-dark">${v.description}</span>
     </div>`;
   }).join('');
@@ -797,15 +797,15 @@ function renderProviders() {
     <tr class="border-b border-border-light dark:border-border-dark last:border-b-0">
       <td class="px-6 py-4 text-text-primary-light dark:text-text-primary-dark font-medium">${escapeHtml(p.name)}</td>
       <td class="px-6 py-4">
-        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary dark:bg-primary/20">${escapeHtml(TYPE_LABELS[p.type] || p.type)}</span>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark">${escapeHtml(TYPE_LABELS[p.type] || p.type)}</span>
       </td>
       <td class="px-6 py-4 text-text-secondary-light dark:text-text-secondary-dark font-mono text-sm">${escapeHtml(p.model || '')}</td>
       <td class="px-6 py-4 text-right">
         <div class="flex justify-end gap-4">
-          <button class="provider-edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-primary" data-id="${p.id}">
+          <button class="provider-edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-text-primary-dark" data-id="${p.id}">
             <span class="material-symbols-outlined">edit</span>
           </button>
-          <button class="provider-delete-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-danger dark:hover:text-danger" data-id="${p.id}">
+          <button class="provider-delete-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-danger dark:hover:text-text-primary-dark" data-id="${p.id}">
             <span class="material-symbols-outlined">delete</span>
           </button>
         </div>
@@ -1058,7 +1058,7 @@ function renderShortcuts() {
   shortcutsTableBody.innerHTML = shortcuts.map(shortcut => {
     const isInactive = shortcut.inactive === true;
     const inactiveBadge = isInactive
-      ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">冲突，未生效</span>`
+      ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark">冲突，未生效</span>`
       : '';
     const recheckBtn = isInactive
       ? `<button class="recheck-btn inline-flex items-center gap-1 text-sm text-primary hover:underline cursor-pointer" data-id="${shortcut.id}">
@@ -1079,10 +1079,10 @@ function renderShortcuts() {
       <td class="px-6 py-4 text-right">
         <div class="flex justify-end items-center gap-4">
           ${recheckBtn}
-          <button class="edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-primary" data-id="${shortcut.id}">
+          <button class="edit-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-primary dark:hover:text-text-primary-dark" data-id="${shortcut.id}">
             <span class="material-symbols-outlined">edit</span>
           </button>
-          <button class="delete-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-danger dark:hover:text-danger" data-id="${shortcut.id}">
+          <button class="delete-btn text-text-secondary-light dark:text-text-secondary-dark hover:text-danger dark:hover:text-text-primary-dark" data-id="${shortcut.id}">
             <span class="material-symbols-outlined">delete</span>
           </button>
         </div>
