@@ -1,4 +1,4 @@
-name: 使用 Agent 分流新 Issue
+name: 使用 Agent 分诊新 Issue
 
 on:
   issues:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   triage:
-    name: 运行项目分流技能
+    name: 运行issues分诊技能
     if: ${{ toJSON(github.event.issue.labels) == '[]' }}
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 15
@@ -42,7 +42,7 @@ jobs:
 
           chmod 600 "$RUNNER_TEMP/triage-issue.json"
 
-      - name: 运行 Agent 分流并打标签
+      - name: 运行 Agent 分诊并打标签
         shell: bash
         env:
           ADAPTER: ${{ vars.TRIAGE_ADAPTER || 'claude' }}
