@@ -2,19 +2,5 @@
 set -eu
 
 echo "Running pre-push verification..."
-
-echo ""
-echo "━━━ Lint ━━━"
-npm run lint
-
-echo ""
-echo "━━━ Typecheck ━━━"
-npm run typecheck
-
-echo ""
-echo "━━━ Tests + coverage (lines ≥ 60%) ━━━"
-npx c8 --reporter=text --all --include='src/**/*.js' \
-  --check-coverage --lines 60 npm test
-
-echo ""
+npm run verify
 echo "Pre-push verification passed."

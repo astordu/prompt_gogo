@@ -10,7 +10,7 @@
     "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "coverage": "c8 --reporter=text --reporter=html --all --include='src/**/*.js' --reports-dir=/tmp/prompt-gogo-coverage npm test",
-    "verify": "./.githooks/pre-push",
+    "verify": "npm run lint && npm run typecheck && c8 --reporter=text --all --include='src/**/*.js' --check-coverage --lines 60 npm test",
     "dist": "electron-builder --mac dmg",
     "build": "electron-builder"
   },
