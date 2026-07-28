@@ -39,9 +39,9 @@ function formatAcceleratorForDisplay(accelerator) {
   return parts.map(part => {
     const mod = MODIFIER_NAMES[part];
     if (mod) {
-      return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${mod.label}">${mod.symbol}</kbd>`;
+      return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${mod.label}">${mod.symbol}</kbd>`;
     }
-    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${part}">${part}</kbd>`;
+    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${part}">${part}</kbd>`;
   }).join(' ');
 }
 
@@ -603,8 +603,8 @@ function renderMenuItems() {
   completionMenu.innerHTML = filteredVars.map((v, i) => {
     const isHighlighted = i === highlightedIndex;
     const bgClass = isHighlighted
-      ? 'bg-background-light dark:bg-background-dark'
-      : 'hover:bg-background-light dark:hover:bg-background-dark';
+      ? 'bg-surface-light dark:bg-surface-dark'
+      : 'hover:bg-surface-light dark:hover:bg-surface-dark';
     return `<div class="completion-item ${bgClass}" data-var="${v.name}" data-index="${i}">
       <span class="completion-item-name text-text-primary-light dark:text-text-primary-dark">${v.name}</span>
       <span class="completion-item-desc text-text-secondary-light dark:text-text-secondary-dark">${v.description}</span>
@@ -797,7 +797,7 @@ function renderProviders() {
     <tr class="border-b border-border-light dark:border-border-dark last:border-b-0">
       <td class="px-6 py-4 text-text-primary-light dark:text-text-primary-dark font-medium">${escapeHtml(p.name)}</td>
       <td class="px-6 py-4">
-        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark">${escapeHtml(TYPE_LABELS[p.type] || p.type)}</span>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark">${escapeHtml(TYPE_LABELS[p.type] || p.type)}</span>
       </td>
       <td class="px-6 py-4 text-text-secondary-light dark:text-text-secondary-dark font-mono text-sm">${escapeHtml(p.model || '')}</td>
       <td class="px-6 py-4 text-right">
@@ -1058,7 +1058,7 @@ function renderShortcuts() {
   shortcutsTableBody.innerHTML = shortcuts.map(shortcut => {
     const isInactive = shortcut.inactive === true;
     const inactiveBadge = isInactive
-      ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark">冲突，未生效</span>`
+      ? `<span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark">冲突，未生效</span>`
       : '';
     const recheckBtn = isInactive
       ? `<button class="recheck-btn inline-flex items-center gap-1 text-sm text-primary hover:underline cursor-pointer" data-id="${shortcut.id}">
@@ -1133,7 +1133,7 @@ function formatShortcut(shortcut) {
       displayName = '⇧';
       ariaLabel = 'Shift';
     }
-    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${ariaLabel}">${displayName}</kbd>`;
+    return `<kbd class="px-2 py-1.5 text-xs font-semibold text-text-secondary-light dark:text-text-secondary-dark bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-md" aria-label="${ariaLabel}">${displayName}</kbd>`;
   }).join(' ');
 }
 

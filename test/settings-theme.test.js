@@ -12,7 +12,9 @@ test('settings theme uses only neutral color tokens and utilities', () => {
   const renderer = fs.readFileSync(rendererPath, 'utf8');
   const chromaticUtilities = /\b(?:bg|text|border|from|to)-(?:blue|green|red|yellow|indigo|purple|pink|orange)-/;
 
-  assert.match(settings, /"background-light": "#f6f8fa"/);
+  assert.match(settings, /<html lang="zh-CN">/);
+  assert.match(settings, /"background-light": "#ffffff"/);
+  assert.match(settings, /"surface-light": "#f6f8fa"/);
   assert.match(settings, /"background-dark": "#0d1117"/);
   assert.match(settings, /"card-light": "#ffffff"/);
   assert.match(settings, /"card-dark": "#161b22"/);
@@ -113,7 +115,8 @@ test('settings renderer applies the neutral theme to dynamic content', async (t)
   const providerBadge = page.querySelector('#providers-table-body span');
   const inactiveBadge = page.querySelector('#shortcuts-table-body td:nth-child(2) span');
   assert.match(providerBadge.className, /border-border-light/);
-  assert.match(inactiveBadge.className, /bg-background-light/);
+  assert.match(providerBadge.className, /bg-surface-light/);
+  assert.match(inactiveBadge.className, /bg-surface-light/);
   assert.doesNotMatch(`${providerBadge.className} ${inactiveBadge.className}`, /yellow|blue/);
 
   page.getElementById('mac-permission-toggle').click();
