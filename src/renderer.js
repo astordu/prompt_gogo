@@ -252,6 +252,10 @@ const macPermissionToggle = document.getElementById('mac-permission-toggle');
 const macPermissionContent = document.getElementById('mac-permission-content');
 const macPermissionIcon = document.getElementById('mac-permission-icon');
 
+const aboutToggle = document.getElementById('about-toggle');
+const aboutContent = document.getElementById('about-content');
+const aboutIcon = document.getElementById('about-icon');
+
 // --- Template chip editor (contenteditable + atomic chips) ---
 
 function createChip(varName) {
@@ -755,6 +759,19 @@ macPermissionToggle.addEventListener('click', () => {
   } else {
     macPermissionContent.classList.add('hidden');
     macPermissionIcon.style.transform = 'rotate(0deg)';
+  }
+});
+
+// About / Contact Toggle
+aboutToggle.addEventListener('click', () => {
+  const isHidden = aboutContent.classList.contains('hidden');
+
+  if (isHidden) {
+    aboutContent.classList.remove('hidden');
+    aboutIcon.style.transform = 'rotate(180deg)';
+  } else {
+    aboutContent.classList.add('hidden');
+    aboutIcon.style.transform = 'rotate(0deg)';
   }
 });
 

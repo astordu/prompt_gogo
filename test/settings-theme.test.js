@@ -122,6 +122,11 @@ test('settings renderer applies the neutral theme to dynamic content', async (t)
   page.getElementById('mac-permission-toggle').click();
   assert.equal(page.getElementById('mac-permission-content').classList.contains('hidden'), false);
 
+  // About section: collapsed by default, expands on click
+  assert.equal(page.getElementById('about-content').classList.contains('hidden'), true);
+  page.getElementById('about-toggle').click();
+  assert.equal(page.getElementById('about-content').classList.contains('hidden'), false);
+
   page.getElementById('add-provider-btn').click();
   assert.equal(page.getElementById('provider-modal').classList.contains('hidden'), false);
 
