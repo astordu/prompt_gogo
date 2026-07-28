@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+echo "Running pre-push verification..."
+
+if ! npm run verify; then
+  echo "Pre-push verification failed. Fix the errors and retry git push." >&2
+  exit 1
+fi
+
+echo "Pre-push verification passed."
