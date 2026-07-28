@@ -53,10 +53,10 @@ GitHub issues 在上下文开头提供，包含所有 open issues 的正文和�
 
 # 提交后
 
-- 如果任务**完全完成**：使用 `gh issue close <number>` 关闭该 GitHub issue
-- 如果任务**部分完成**：使用 `gh issue comment <number> --body "..."` 在 issue 上留评论，说明已完成的工作和剩余部分
+- 如果任务**完全完成**：使用 `gh issue close <number>` 关闭该 GitHub issue 以及 将codereview的结果也写到评论中
+- 如果任务**部分完成**：使用 `gh issue comment <number> --body "..."` 在 issue 上留评论，说明已完成的工作和剩余部分 以及 将codereview的结果也写到评论中
 
-push所有代码到远程仓库
+push所有代码到远程仓库。
 
 # 最终规则
 
