@@ -316,14 +316,14 @@
 
   <!-- Modal for Add/Edit Prompt -->
   <div id="prompt-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 hidden">
-    <div class="w-full max-w-2xl rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-xl">
-      <div class="flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
+    <div class="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-xl">
+      <div class="flex-shrink-0 flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
         <h3 id="modal-title" class="text-lg font-bold text-text-primary-light dark:text-text-primary-dark">编辑提示模板</h3>
         <button id="close-modal" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <div class="p-6 space-y-6">
+      <div class="overflow-y-auto p-6 space-y-6">
         <div>
           <label class="block text-base font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="prompt-name">提示名称</label>
           <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="prompt-name" placeholder="例如：翻译为西班牙语" type="text"/>
@@ -360,11 +360,11 @@
               </div>
             </div>
           </label>
-          <div id="prompt-template" contenteditable="true" data-placeholder="总结以下文本：&#10;&#10;@select_content" class="w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-text-primary-light dark:text-text-primary-dark font-mono text-sm p-4 min-h-[12rem] whitespace-pre-wrap break-words"></div>
+          <div id="prompt-template" contenteditable="true" data-placeholder="总结以下文本：&#10;&#10;@select_content" class="w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-text-primary-light dark:text-text-primary-dark font-mono text-sm p-4 min-h-[12rem] max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words"></div>
           <p id="template-error" class="text-danger text-xs mt-2 hidden">模板必须包含 @select_content 变量！</p>
         </div>
       </div>
-      <div class="flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-surface-light dark:bg-surface-dark rounded-b-xl">
+      <div class="flex-shrink-0 flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-surface-light dark:bg-surface-dark rounded-b-xl">
         <button id="cancel-modal" class="min-w-[84px] cursor-pointer items-center justify-center rounded-lg h-10 px-4 bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark text-sm font-bold leading-normal tracking-[0.015em]">
           <span class="truncate">取消</span>
         </button>
@@ -382,14 +382,14 @@
 
   <!-- Modal for Add/Edit Provider -->
   <div id="provider-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 hidden">
-    <div class="w-full max-w-lg rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-xl">
-      <div class="flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
+    <div class="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-xl">
+      <div class="flex-shrink-0 flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
         <h3 id="provider-modal-title" class="text-lg font-bold text-text-primary-light dark:text-text-primary-dark">添加 Provider</h3>
         <button id="close-provider-modal" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
-      <div class="p-6 space-y-5">
+      <div class="overflow-y-auto p-6 space-y-5">
         <div>
           <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-name">名称</label>
           <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-name" placeholder="例如：我的 DeepSeek" type="text"/>
@@ -429,7 +429,7 @@
           <span id="verify-provider-status" class="text-sm hidden"></span>
         </div>
       </div>
-      <div class="flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-surface-light dark:bg-surface-dark rounded-b-xl">
+      <div class="flex-shrink-0 flex justify-end gap-4 border-t border-border-light dark:border-border-dark px-6 py-4 bg-surface-light dark:bg-surface-dark rounded-b-xl">
         <button id="cancel-provider-modal" class="min-w-[84px] cursor-pointer items-center justify-center rounded-lg h-10 px-4 bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark text-text-primary-light dark:text-text-primary-dark text-sm font-bold leading-normal tracking-[0.015em]">
           取消
         </button>
