@@ -8,6 +8,7 @@
     "dev": "electron . --dev",
     "test": "node --test test/*.test.js test/run/*.test.js",
     "coverage": "c8 --reporter=text --reporter=html --all --include='src/**/*.js' --reports-dir=/tmp/prompt-gogo-coverage node --test test/*.test.js test/run/*.test.js",
+    "verify": "npm test",
     "dist": "electron-builder --mac dmg",
     "build": "electron-builder"
   },
