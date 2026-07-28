@@ -7,8 +7,11 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "test": "node --test test/*.test.js test/run/*.test.js",
-    "coverage": "c8 --reporter=text --reporter=html --all --include='src/**/*.js' --reports-dir=/tmp/prompt-gogo-coverage node --test test/*.test.js test/run/*.test.js",
-    "verify": "npm test",
+    "lint": "eslint src test --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "coverage": "c8 --reporter=text --reporter=html --all --include='src/**/*.js' --reports-dir=/tmp/prompt-gogo-coverage npm test",
+    "coverage:check": "c8 --reporter=text --all --include='src/**/*.js' --check-coverage --lines 50 npm test",
+    "verify": "npm run lint && npm run typecheck && npm run coverage:check",
     "dist": "electron-builder --mac dmg",
     "build": "electron-builder"
   },
@@ -25,9 +28,13 @@
     "electron-store": "^8.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "c8": "^12.0.0",
     "electron": "^28.0.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0",
+    "typescript": "^7.0.2"
   },
   "build": {
     "appId": "com.promptgogo.app",

@@ -70,8 +70,8 @@ end tell`;
  *
  * @param {Object} deps
  * @param {Object} deps.clipboard - Electron clipboard module (readText)
- * @param {Function} [deps.runScript] - runs a shell command synchronously, returns stdout string
- * @param {Function} [deps.delay] - async delay (ms)
+ * @param {(script: string) => string} [deps.runScript] - runs a shell command synchronously, returns stdout string
+ * @param {(ms: number) => Promise<void>} [deps.delay] - async delay (ms)
  */
 function createTextReader({ clipboard, runScript, delay }) {
   const exec = runScript || ((cmd) => execSync(cmd, { encoding: 'utf8', timeout: 2000 }).trim());

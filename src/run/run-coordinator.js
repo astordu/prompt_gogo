@@ -53,6 +53,7 @@ const ENDING_HOLD_MS = 500;
  * @property {() => Promise<string>} readSelectedText - Reads the currently selected text
  * @property {OutputTargetAdapter} [outputTarget] - Captures and validates the Output Target
  * @property {RunIndicatorSink} [runIndicator] - Writes/removes inline Run Indicators
+ * @property {(ms: number) => Promise<void>} [delay] - Injectable delay for Run Indicator timing
  */
 
 class RunCoordinator {

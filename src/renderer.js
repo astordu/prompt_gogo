@@ -256,6 +256,7 @@ const macPermissionIcon = document.getElementById('mac-permission-icon');
 
 function createChip(varName) {
   const chip = document.createElement('span');
+  // @ts-expect-error Existing browser assignment is coerced to the string "false".
   chip.contentEditable = false;
   chip.className = 'template-chip';
   chip.dataset.variable = varName;

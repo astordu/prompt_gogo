@@ -36,7 +36,7 @@ async function* sseTextStream(responseStream) {
  * Parse a single SSE line.
  *
  * @param {string} line
- * @returns {string | null | Symbol} content string, null to skip, or DONE to stop
+ * @returns {string | null | typeof DONE} content string, null to skip, or DONE to stop
  */
 function parseSSELine(line) {
   if (!line.startsWith('data: ')) return null;

@@ -373,7 +373,10 @@ class ShortcutDraft {
         } else {
           // Save failed — map reason to semantic status, preserve draft
           this._saving = false;
-          const reason = result && result.reason ? result.reason : 'registration-failed';
+          const reason =
+            result && /** @type {{ reason?: string }} */ (result).reason
+              ? /** @type {{ reason: string }} */ (result).reason
+              : 'registration-failed';
           this._saveFailureReason = reason;
           this._applySaveFailureStatus(reason);
           this._emit();

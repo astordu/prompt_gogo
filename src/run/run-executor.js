@@ -22,7 +22,7 @@ const { pipeToCursor } = require('./stream-output');
 
 /**
  * @typedef {Object} RunExecutorOptions
- * @property {import('./run-coordinator').RunCoordinator} coordinator
+ * @property {InstanceType<typeof import('./run-coordinator').RunCoordinator>} coordinator
  * @property {() => Promise<string>} readSelectedText
  * @property {(providerId: string) => Object|null} findProvider
  * @property {(requestConfig: Object, prompt: string, signal: AbortSignal|null) => Promise<AsyncIterable<string>>} sendModelRequest

@@ -129,7 +129,7 @@ class ShortcutService {
   /**
    * Attempt to register a single shortcut config.
    * @private
-   * @returns {{ ok: true } | { ok: false, reason: string }}
+   * @returns {{ ok: true } | { ok: false, reason: 'duplicate' | 'rejected' | 'exception' }}
    */
   _tryRegister(sc) {
     if (this._registered.has(sc.shortcut)) {
@@ -147,7 +147,7 @@ class ShortcutService {
 
       this._registered.set(sc.shortcut, sc);
       return { ok: true };
-    } catch (e) {
+    } catch {
       return { ok: false, reason: 'exception' };
     }
   }
@@ -517,7 +517,10 @@ class ShortcutService {
       return { recovered: true };
     }
 
-    return { recovered: false, reason: result.reason };
+    return {
+      recovered: false,
+      reason: /** @type {{ reason: 'duplicate' | 'rejected' | 'exception' }} */ (result).reason
+    };
   }
 
   // ------------------------------------------------------------------

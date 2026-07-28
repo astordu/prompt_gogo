@@ -12,6 +12,7 @@ const { sseTextStream } = require('./run/sse-stream');
 const { RunExecutor } = require('./run/run-executor');
 
 // Initialize config store
+/** @type {any} Electron Store schema is migrated at runtime from the legacy config shape. */
 const store = new Store({
   defaults: {
     providers: [],
