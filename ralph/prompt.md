@@ -35,18 +35,10 @@ GitHub issues 在上下文开头提供，包含所有 open issues 的正文和�
 
 # 反馈循环
 
-提交和 push 之前，运行以下反馈循环：
-
-- `npm run verify` 运行仓库统一验证
-
-修复所有失败并重新运行验证，通过后再提交。
-
 执行 `git push` 时，Git pre-push hook 会再次运行相同验证。如果 push 因验证失败而被阻止：
 
 1. 阅读 hook 输出的完整失败原因。
 2. 定位并修复失败。
-3. 重新运行 `npm run verify`。
-4. 验证通过后重新执行 `git push`。
 
 禁止使用 `--no-verify` 绕过验证。
 
