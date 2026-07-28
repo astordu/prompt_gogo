@@ -14,7 +14,7 @@ npm run typecheck
 echo ""
 echo "━━━ Tests + coverage (lines ≥ 60%) ━━━"
 npx c8 --reporter=text --all --include='src/**/*.js' \
-  --check-coverage --lines 50 npm test
+  --check-coverage --lines 60 npm test
 
 echo ""
 echo "Pre-push verification passed."
