@@ -1,3 +1,7 @@
+# 首先
+
+更新最新代码 git pull
+
 # 输入
 
 GitHub issues 在上下文开头提供，包含所有 open issues 的正文和评论。
