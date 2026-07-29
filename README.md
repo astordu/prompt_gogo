@@ -3,6 +3,10 @@
 一个 macOS 桌面应用，可在任何应用中通过键盘快捷键快速处理选中的文本，使用 AI 驱动的自定义提示模板。
 <img width="800" height="435" alt="CleanShot 2025-07-24 at 20 39 57" src="https://github.com/user-attachments/assets/9d1bbe8a-7538-47c6-8e7c-0104521571b0" />
 
+<img width="800" height="303" alt="CleanShot 2025-07-24 at 20 42 00" src="https://github.com/user-attachments/assets/7ede90ea-196b-46bc-9b94-ceafe3fabf59" />
+
+<img width="800" height="555" alt="CleanShot 2025-07-24 at 20 44 17" src="https://github.com/user-attachments/assets/8ec5b121-500b-40c2-9eeb-ae9a033aa7cd" />
+
 ## 功能特性
 
 - **全局键盘快捷键**：在任何应用中一键触发 AI 文本处理
