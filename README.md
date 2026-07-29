@@ -1,8 +1,7 @@
 # Prompt Go
 
 一个 macOS 桌面应用，可在任何应用中通过键盘快捷键快速处理选中的文本，使用 AI 驱动的自定义提示模板。
-
-![Showcase](showcase.png)
+<img width="800" height="435" alt="CleanShot 2025-07-24 at 20 39 57" src="https://github.com/user-attachments/assets/9d1bbe8a-7538-47c6-8e7c-0104521571b0" />
 
 ## 功能特性
 
