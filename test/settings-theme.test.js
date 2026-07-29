@@ -141,4 +141,23 @@ test('settings renderer applies the neutral theme to dynamic content', async (t)
   assert.equal(calls.savedProviders.length, 1);
   assert.equal(calls.savedProviders[0].name, 'Custom Model');
   assert.equal(page.getElementById('provider-modal').classList.contains('hidden'), true);
+
+  // Prompt template editor enlarge mode (#46): toggle on/off, icon swaps, no leak on reopen
+  page.getElementById('add-shortcut-btn').click();
+  const promptModalBox = page.getElementById('prompt-modal-box');
+  const expandIcon = page.getElementById('expand-modal-icon');
+  assert.equal(promptModalBox.classList.contains('expanded'), false);
+  assert.equal(expandIcon.textContent, 'fullscreen');
+  page.getElementById('expand-modal-btn').click();
+  assert.equal(promptModalBox.classList.contains('expanded'), true);
+  assert.equal(expandIcon.textContent, 'fullscreen_exit');
+  page.getElementById('expand-modal-btn').click();
+  assert.equal(promptModalBox.classList.contains('expanded'), false);
+  // Enlarge state must reset on close and not leak into the next session
+  page.getElementById('expand-modal-btn').click();
+  assert.equal(promptModalBox.classList.contains('expanded'), true);
+  page.getElementById('cancel-modal').click();
+  assert.equal(promptModalBox.classList.contains('expanded'), false);
+  page.getElementById('add-shortcut-btn').click();
+  assert.equal(promptModalBox.classList.contains('expanded'), false);
 });

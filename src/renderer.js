@@ -13,6 +13,9 @@ const modalTitle = document.getElementById('modal-title');
 const closeModalBtn = document.getElementById('close-modal');
 const cancelModalBtn = document.getElementById('cancel-modal');
 const savePromptBtn = document.getElementById('save-prompt');
+const expandModalBtn = document.getElementById('expand-modal-btn');
+const expandModalIcon = document.getElementById('expand-modal-icon');
+const promptModalBox = document.getElementById('prompt-modal-box');
 
 const promptNameInput = document.getElementById('prompt-name');
 const keyboardShortcutInput = document.getElementById('keyboard-shortcut');
@@ -1242,12 +1245,28 @@ async function recheckShortcut(id) {
   }
 }
 
+// --- Prompt template editor enlarge mode (#46) ---
+function setExpanded(expanded) {
+  promptModalBox.classList.toggle('expanded', expanded);
+  expandModalIcon.textContent = expanded ? 'fullscreen_exit' : 'fullscreen';
+  expandModalBtn.title = expanded ? '还原' : '放大编辑区';
+  expandModalBtn.setAttribute('aria-label', expanded ? '还原' : '放大编辑区');
+}
+
+expandModalBtn.addEventListener('click', () => {
+  setExpanded(!promptModalBox.classList.contains('expanded'));
+});
+
 function openModal() {
+  // Always start in the default (collapsed) size — no enlarge state leaks across sessions
+  setExpanded(false);
   promptModal.classList.remove('hidden');
 }
 
 function closeModal() {
   promptModal.classList.add('hidden');
+  // Clear enlarge state so reopening always starts collapsed
+  setExpanded(false);
   // Close the draft session — all in-flight results become stale
   draft.close();
 }

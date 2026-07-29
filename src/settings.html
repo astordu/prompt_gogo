@@ -72,6 +72,17 @@
     .dark #prompt-template:empty::before {
       color: #9198a1;
     }
+    /* Enlarge mode for the prompt template editor (#46) */
+    #prompt-modal-box {
+      transition: max-width 0.2s ease, max-height 0.2s ease;
+    }
+    #prompt-modal-box.expanded {
+      max-width: 95vw;
+      max-height: 95vh;
+    }
+    #prompt-modal-box.expanded #prompt-template {
+      max-height: 65vh;
+    }
     #completion-menu {
       position: fixed;
       z-index: 9999;
@@ -316,12 +327,17 @@
 
   <!-- Modal for Add/Edit Prompt -->
   <div id="prompt-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 hidden">
-    <div class="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-xl">
+    <div id="prompt-modal-box" class="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark shadow-xl">
       <div class="flex-shrink-0 flex items-center justify-between border-b border-border-light dark:border-border-dark px-6 py-4">
         <h3 id="modal-title" class="text-lg font-bold text-text-primary-light dark:text-text-primary-dark">编辑提示模板</h3>
-        <button id="close-modal" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
-          <span class="material-symbols-outlined">close</span>
-        </button>
+        <div class="flex items-center gap-1">
+          <button id="expand-modal-btn" title="放大编辑区" aria-label="放大编辑区" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
+            <span id="expand-modal-icon" class="material-symbols-outlined">fullscreen</span>
+          </button>
+          <button id="close-modal" class="text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
       </div>
       <div class="overflow-y-auto p-6 space-y-6">
         <div>
