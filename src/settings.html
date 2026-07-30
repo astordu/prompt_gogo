@@ -119,6 +119,24 @@
       border-color: #f0f6fc !important;
       --tw-ring-color: rgba(240, 246, 252, 0.2) !important;
     }
+    /* Highlight dependent rows when a Provider deletion is blocked (#47).
+       Neutral palette only — the row background pulses briefly. The finite
+       iteration count stops it automatically; renderer.js also removes the
+       class on animationend so it can be re-triggered. */
+    .shortcut-row-flash {
+      animation: shortcut-row-flash 0.7s ease-in-out 3;
+    }
+    @keyframes shortcut-row-flash {
+      0%, 100% { background-color: transparent; }
+      50% { background-color: #1f2328; }
+    }
+    .dark .shortcut-row-flash {
+      animation-name: shortcut-row-flash-dark;
+    }
+    @keyframes shortcut-row-flash-dark {
+      0%, 100% { background-color: transparent; }
+      50% { background-color: #f0f6fc; }
+    }
   </style>
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display">

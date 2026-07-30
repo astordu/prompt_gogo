@@ -163,3 +163,100 @@ test('settings renderer applies the neutral theme to dynamic content', async (t)
   page.getElementById('add-shortcut-btn').click();
   assert.equal(promptModalBox.classList.contains('expanded'), false);
 });
+
+// #47 — when a Provider deletion is blocked by dependent Shortcuts, the
+// dependent rows must be scrolled to and flashed so the user knows which
+// ones to resolve. Blocking must never delete the Provider.
+test('blocking Provider deletion flashes the dependent shortcut rows (#47)', async (t) => {
+  const settings = fs.readFileSync(settingsPath, 'utf8');
+  const dom = new JSDOM(settings, { url: 'http://localhost/settings.html' });
+  const page = dom.window.document;
+
+  const providerA = { id: 'provider-A', name: '被依赖', type: 'deepseek', model: 'deepseek-v4-flash' };
+  const providerB = { id: 'provider-B', name: '另一个', type: 'deepseek', model: 'deepseek-v4-flash' };
+  const dependentOne = {
+    id: 'sc-1', name: '依赖一', shortcut: 'Control+Alt+1',
+    template: 'a @select_content', providerId: providerA.id,
+  };
+  const dependentTwo = {
+    id: 'sc-2', name: '依赖二', shortcut: 'Control+Alt+2',
+    template: 'b @select_content', providerId: providerA.id,
+  };
+  const independent = {
+    id: 'sc-3', name: '独立', shortcut: 'Control+Alt+3',
+    template: 'c @select_content', providerId: providerB.id,
+  };
+
+  const calls = { deletedProviders: [] };
+  const injectedGlobalKeys = [
+    'window', 'document', 'Event', 'KeyboardEvent', 'Node', 'HTMLElement',
+    'getComputedStyle', 'confirm', 'alert', 'providerModule', 'templateModule', 'shortcutDraftModule',
+  ];
+  const originalGlobals = new Map(
+    injectedGlobalKeys.map(key => [key, Object.getOwnPropertyDescriptor(global, key)]),
+  );
+
+  Object.assign(global, {
+    window: dom.window,
+    document: dom.window.document,
+    Event: dom.window.Event,
+    KeyboardEvent: dom.window.KeyboardEvent,
+    Node: dom.window.Node,
+    HTMLElement: dom.window.HTMLElement,
+    getComputedStyle: dom.window.getComputedStyle,
+    confirm: () => true,
+    alert: () => {},
+    providerModule: require('../src/provider'),
+    templateModule: require('../src/template'),
+    shortcutDraftModule: require('../src/shortcut-draft'),
+  });
+  Object.assign(dom.window, {
+    confirm: global.confirm,
+    alert: global.alert,
+    electronAPI: {
+      getConfig: async () => ({ providers: [providerA, providerB], shortcuts: [dependentOne, dependentTwo, independent] }),
+      saveProvider: async () => {},
+      deleteProvider: async (id) => calls.deletedProviders.push(id),
+      validateProvider: async () => ({ success: true }),
+      saveShortcut: async () => ({ success: true }),
+      deleteShortcut: async () => {},
+      checkShortcutAvailability: async () => ({ status: 'available' }),
+      recommendShortcut: async () => null,
+      recheckShortcut: async () => ({ recovered: true }),
+    },
+  });
+
+  t.after(() => {
+    delete require.cache[rendererPath];
+    dom.window.close();
+    for (const key of injectedGlobalKeys) {
+      const descriptor = originalGlobals.get(key);
+      if (descriptor) {
+        Object.defineProperty(global, key, descriptor);
+      } else {
+        delete global[key];
+      }
+    }
+  });
+
+  delete require.cache[rendererPath];
+  require(rendererPath);
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Trigger deletion on the Provider that two Shortcuts depend on.
+  page.querySelector('.provider-delete-btn[data-id="provider-A"]').click();
+  await new Promise(resolve => setImmediate(resolve));
+
+  const rowOne = page.querySelector('tr[data-shortcut-id="sc-1"]');
+  const rowTwo = page.querySelector('tr[data-shortcut-id="sc-2"]');
+  const rowIndependent = page.querySelector('tr[data-shortcut-id="sc-3"]');
+
+  // Both dependent rows flash at once; the unrelated row does not.
+  assert.ok(rowOne.classList.contains('shortcut-row-flash'), 'first dependent row is highlighted');
+  assert.ok(rowTwo.classList.contains('shortcut-row-flash'), 'second dependent row is highlighted');
+  assert.equal(rowIndependent.classList.contains('shortcut-row-flash'), false, 'unrelated row is untouched');
+
+  // Core behavior preserved: the Provider is not deleted while blocked.
+  assert.equal(calls.deletedProviders.length, 0, 'Provider is not deleted while blocked');
+  assert.ok(page.querySelector('.provider-delete-btn[data-id="provider-A"]'), 'Provider row remains');
+});

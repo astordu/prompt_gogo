@@ -951,9 +951,13 @@ function editProvider(id) {
 }
 
 async function deleteProvider(id) {
-  const blocking = shortcuts.filter(s => s.providerId === id).map(s => s.name);
-  if (blocking.length > 0) {
-    alert(`无法删除：以下快捷键正在使用此 Provider：\n${blocking.join('、')}`);
+  const blockingShortcuts = shortcuts.filter(s => s.providerId === id);
+  if (blockingShortcuts.length > 0) {
+    const names = blockingShortcuts.map(s => s.name);
+    alert(`无法删除：以下快捷键正在使用此 Provider：\n${names.join('、')}`);
+    // Guide the user: scroll to and flash every dependent row so they can see
+    // which Shortcuts to resolve first. The Provider stays blocked from deletion.
+    highlightBlockingShortcuts(blockingShortcuts.map(s => s.id));
     return;
   }
   if (!confirm('确定要删除此 Provider 吗？')) return;
@@ -961,6 +965,35 @@ async function deleteProvider(id) {
   await window.electronAPI.deleteProvider(id);
   providers = providers.filter(p => p.id !== id);
   renderProviders();
+}
+
+/**
+ * Scroll to and flash every Shortcut row that blocks a Provider deletion,
+ * so the user knows exactly which entries to resolve first. The flash is a
+ * self-stopping neutral-palette animation (see `.shortcut-row-flash` in
+ * settings.html); it cleans itself up on `animationend`.
+ */
+function highlightBlockingShortcuts(shortcutIds) {
+  const rows = shortcutIds
+    .map(id => document.querySelector(`tr[data-shortcut-id="${id}"]`))
+    .filter(Boolean);
+  if (rows.length === 0) return;
+
+  // Bring the first dependent row into view; the rest flash in place.
+  // scrollIntoView may be unavailable in some embedded/headless contexts, so
+  // guard the call rather than assuming the API exists.
+  const firstRow = rows[0];
+  if (typeof firstRow.scrollIntoView === 'function') {
+    firstRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  rows.forEach(row => {
+    if (row.classList.contains('shortcut-row-flash')) return;
+    row.classList.add('shortcut-row-flash');
+    row.addEventListener('animationend', () => {
+      row.classList.remove('shortcut-row-flash');
+    }, { once: true });
+  });
 }
 
 closeProviderModalBtn.addEventListener('click', closeProviderModal);
@@ -1071,7 +1104,7 @@ function renderShortcuts() {
       : '';
 
     return `
-    <tr class="border-b border-border-light dark:border-border-dark last:border-b-0">
+    <tr class="border-b border-border-light dark:border-border-dark last:border-b-0" data-shortcut-id="${escapeHtml(shortcut.id)}">
       <td class="px-6 py-4 whitespace-nowrap">
         ${formatShortcut(shortcut.shortcut)}
       </td>
