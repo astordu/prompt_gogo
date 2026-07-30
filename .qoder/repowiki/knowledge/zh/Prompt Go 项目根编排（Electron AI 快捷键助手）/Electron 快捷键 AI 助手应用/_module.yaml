@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: electron_app
+title: Electron 快捷键 AI 助手应用
+scope:
+    - src/
+source_files: []
+depends_on: []
+related_to:
+    - path: tests

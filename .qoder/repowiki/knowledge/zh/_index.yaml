@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-30T06:10:40Z"
+exported_at: "2026-07-30T07:02:04Z"
 modules:
     "":
-        dir_name: Prompt Go 桌面应用（Electron + AI 快捷键文本处理）
-        title: Prompt Go 桌面应用（Electron + AI 快捷键文本处理）
+        dir_name: Prompt Go 项目根编排（Electron AI 快捷键助手）
+        title: Prompt Go 项目根编排（Electron AI 快捷键助手）
         scope:
             - README.md
             - CONTEXT.md
@@ -37,10 +37,11 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: scripts
     electron_app:
-        dir_name: Prompt Go Electron 应用主进程与渲染器
-        title: Prompt Go Electron 应用主进程与渲染器
+        dir_name: Electron 快捷键 AI 助手应用
+        title: Electron 快捷键 AI 助手应用
         scope:
             - src/
         source_files: []
@@ -48,10 +49,11 @@ modules:
             - electron_app/renderer_ui
             - electron_app/run_pipeline
         depends_on: []
-        related_to: []
+        related_to:
+            - path: tests
     electron_app/renderer_ui:
-        dir_name: 设置页渲染器与模板引擎（Electron Renderer）
-        title: 设置页渲染器与模板引擎（Electron Renderer）
+        dir_name: Electron 设置窗口渲染进程（Provider 管理与模板编辑器）
+        title: Electron 设置窗口渲染进程（Provider 管理与模板编辑器）
         scope:
             - src/renderer.js
             - src/settings.html
@@ -61,7 +63,6 @@ modules:
         depends_on: []
         related_to:
             - path: electron_app/run_pipeline
-            - path: tests
     electron_app/run_pipeline:
         dir_name: 运行管线编排与输出流处理
         title: 运行管线编排与输出流处理
@@ -81,7 +82,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: docs
     tests:
         dir_name: 单元测试套件（nodetest）
         title: 单元测试套件（node:test）
@@ -91,5 +93,5 @@ modules:
         children: []
         depends_on: []
         related_to:
-            - path: electron_app/renderer_ui
+            - path: electron_app
             - path: electron_app/run_pipeline

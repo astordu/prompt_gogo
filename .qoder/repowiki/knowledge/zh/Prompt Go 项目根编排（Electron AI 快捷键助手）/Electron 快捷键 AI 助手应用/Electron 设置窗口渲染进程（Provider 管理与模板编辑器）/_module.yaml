@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: electron_app/renderer_ui
+title: Electron 设置窗口渲染进程（Provider 管理与模板编辑器）
+scope:
+    - src/renderer.js
+    - src/settings.html
+    - src/template.js
+source_files: []
+depends_on: []
+related_to:
+    - path: electron_app/run_pipeline

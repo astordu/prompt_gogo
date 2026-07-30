@@ -1,0 +1,19 @@
+schema_version: 1
+module_path: ""
+title: Prompt Go 项目根编排（Electron AI 快捷键助手）
+scope:
+    - README.md
+    - CONTEXT.md
+    - AGENTS.md
+    - .gitignore
+    - package.json
+    - package-lock.json
+    - tsconfig.json
+    - eslint.config.js
+    - diagnose.js
+    - test-shortcut.js
+    - showcase.png
+    - test-permissions.sh
+source_files: []
+depends_on: []
+related_to: []
