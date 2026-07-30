@@ -251,10 +251,6 @@ shortcutProviderSelect.addEventListener('change', () => {
   draft.setProviderId(shortcutProviderSelect.value);
 });
 
-const macPermissionToggle = document.getElementById('mac-permission-toggle');
-const macPermissionContent = document.getElementById('mac-permission-content');
-const macPermissionIcon = document.getElementById('mac-permission-icon');
-
 const aboutToggle = document.getElementById('about-toggle');
 const aboutContent = document.getElementById('about-content');
 const aboutIcon = document.getElementById('about-icon');
@@ -752,20 +748,7 @@ async function init() {
   renderShortcuts();
 }
 
-// Mac Permission Guide Toggle
-macPermissionToggle.addEventListener('click', () => {
-  const isHidden = macPermissionContent.classList.contains('hidden');
-
-  if (isHidden) {
-    macPermissionContent.classList.remove('hidden');
-    macPermissionIcon.style.transform = 'rotate(180deg)';
-  } else {
-    macPermissionContent.classList.add('hidden');
-    macPermissionIcon.style.transform = 'rotate(0deg)';
-  }
-});
-
-// About / Contact Toggle
+// About & Help Toggle
 aboutToggle.addEventListener('click', () => {
   const isHidden = aboutContent.classList.contains('hidden');
 

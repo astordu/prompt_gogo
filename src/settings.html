@@ -196,12 +196,12 @@
             </div>
           </div>
 
-          <!-- About / Contact (collapsible, collapsed by default) -->
+          <!-- About & Help (collapsible, collapsed by default) -->
           <div class="mt-12">
             <div class="px-4 pb-3 pt-5">
               <button id="about-toggle" class="flex items-center gap-2 w-full text-left group hover:opacity-80 transition-opacity">
                 <h2 class="text-text-primary-light dark:text-text-primary-dark text-[22px] font-bold leading-tight tracking-[-0.015em] flex items-center">
-                  <span class="material-symbols-outlined align-middle mr-2">info</span>关于
+                  <span class="material-symbols-outlined align-middle mr-2">info</span>关于与帮助
                 </h2>
                 <span id="about-icon" class="material-symbols-outlined text-text-secondary-light dark:text-text-secondary-dark text-2xl transition-transform">
                   expand_more
@@ -235,85 +235,78 @@
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <!-- Mac Permission Guide -->
-          <div class="mt-8">
-            <div class="px-4 pb-3 pt-5">
-              <button id="mac-permission-toggle" class="flex items-center gap-2 w-full text-left group hover:opacity-80 transition-opacity">
-                <h2 class="text-text-primary-light dark:text-text-primary-dark text-[22px] font-bold leading-tight tracking-[-0.015em] flex items-center">
+              <!-- Mac Permission Guide -->
+              <div class="mt-10 px-4 pb-3">
+                <h3 class="text-text-primary-light dark:text-text-primary-dark text-lg font-bold flex items-center">
                   <span class="material-symbols-outlined align-middle mr-2">settings</span>Mac 权限设置指南
-                </h2>
-                <span id="mac-permission-icon" class="material-symbols-outlined text-text-secondary-light dark:text-text-secondary-dark text-2xl transition-transform">
-                  expand_more
-                </span>
-              </button>
-            </div>
-            <div id="mac-permission-content" class="bg-card-light dark:bg-card-dark rounded-xl border border-border-light dark:border-border-dark p-6 hidden">
-              <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mb-4">
-                为了让 Prompt Go 正常工作，您需要授予以下权限：
-              </p>
+                </h3>
+              </div>
+              <div class="bg-card-light dark:bg-card-dark rounded-xl border border-border-light dark:border-border-dark p-6">
+                <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mb-4">
+                  为了让 Prompt Go 正常工作，您需要授予以下权限：
+                </p>
 
-              <div class="space-y-6">
-                <!-- Accessibility Permission -->
-                <div class="flex items-start gap-4">
-                  <div class="flex-shrink-0 w-8 h-8 rounded-full bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark flex items-center justify-center">
-                    <span class="text-text-primary-light dark:text-text-primary-dark font-bold text-sm">1</span>
-                  </div>
-                  <div class="flex-1">
-                    <h4 class="text-text-primary-light dark:text-text-primary-dark font-semibold mb-2">辅助功能权限</h4>
-                    <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mb-2">
-                      此权限用于读取和操作选中的文本内容。
-                    </p>
-                    <div class="bg-surface-light dark:bg-surface-dark rounded-lg p-4 text-sm space-y-2">
-                      <p class="text-text-secondary-light dark:text-text-secondary-dark">
-                        <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">系统设置</span> →
-                        <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">隐私与安全性</span> →
-                        <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">辅助功能</span>
-                      </p>
-                      <p class="text-text-secondary-light dark:text-text-secondary-dark">
-                        找到 <span class="font-semibold text-text-primary-light dark:text-text-primary-dark">Prompt Go</span>，勾选启用
-                      </p>
+                <div class="space-y-6">
+                  <!-- Accessibility Permission -->
+                  <div class="flex items-start gap-4">
+                    <div class="flex-shrink-0 w-8 h-8 rounded-full bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark flex items-center justify-center">
+                      <span class="text-text-primary-light dark:text-text-primary-dark font-bold text-sm">1</span>
                     </div>
-                  </div>
-                </div>
-
-                <!-- Screen Recording Permission -->
-                <div class="flex items-start gap-4">
-                  <div class="flex-shrink-0 w-8 h-8 rounded-full bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark flex items-center justify-center">
-                    <span class="text-text-primary-light dark:text-text-primary-dark font-bold text-sm">2</span>
-                  </div>
-                  <div class="flex-1">
-                    <h4 class="text-text-primary-light dark:text-text-primary-dark font-semibold mb-2">屏幕录制权限（可选）</h4>
-                    <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mb-2">
-                      某些情况下可能需要此权限来获取屏幕内容。
-                    </p>
-                    <div class="bg-surface-light dark:bg-surface-dark rounded-lg p-4 text-sm space-y-2">
-                      <p class="text-text-secondary-light dark:text-text-secondary-dark">
-                        <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">系统设置</span> →
-                        <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">隐私与安全性</span> →
-                        <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">屏幕录制</span>
-                      </p>
-                      <p class="text-text-secondary-light dark:text-text-secondary-dark">
-                        找到 <span class="font-semibold text-text-primary-light dark:text-text-primary-dark">Prompt Go</span>，勾选启用
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Troubleshooting -->
-                <div class="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg p-4">
-                  <div class="flex items-start gap-3">
-                    <span class="material-symbols-outlined text-text-primary-light dark:text-text-primary-dark text-xl mt-0.5">lightbulb</span>
                     <div class="flex-1">
-                      <h4 class="text-text-primary-light dark:text-text-primary-dark font-semibold text-sm mb-1">提示</h4>
-                      <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm">
-                        如果权限设置后仍无法使用，请尝试：<br/>
-                        1. 完全退出 Prompt Go 后重新打开<br/>
-                        2. 在权限设置中移除 Prompt Go，然后重新添加<br/>
-                        3. 重启您的 Mac
+                      <h4 class="text-text-primary-light dark:text-text-primary-dark font-semibold mb-2">辅助功能权限</h4>
+                      <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mb-2">
+                        此权限用于读取和操作选中的文本内容。
                       </p>
+                      <div class="bg-surface-light dark:bg-surface-dark rounded-lg p-4 text-sm space-y-2">
+                        <p class="text-text-secondary-light dark:text-text-secondary-dark">
+                          <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">系统设置</span> →
+                          <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">隐私与安全性</span> →
+                          <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">辅助功能</span>
+                        </p>
+                        <p class="text-text-secondary-light dark:text-text-secondary-dark">
+                          找到 <span class="font-semibold text-text-primary-light dark:text-text-primary-dark">Prompt Go</span>，勾选启用
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Screen Recording Permission -->
+                  <div class="flex items-start gap-4">
+                    <div class="flex-shrink-0 w-8 h-8 rounded-full bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark flex items-center justify-center">
+                      <span class="text-text-primary-light dark:text-text-primary-dark font-bold text-sm">2</span>
+                    </div>
+                    <div class="flex-1">
+                      <h4 class="text-text-primary-light dark:text-text-primary-dark font-semibold mb-2">屏幕录制权限（可选）</h4>
+                      <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm mb-2">
+                        某些情况下可能需要此权限来获取屏幕内容。
+                      </p>
+                      <div class="bg-surface-light dark:bg-surface-dark rounded-lg p-4 text-sm space-y-2">
+                        <p class="text-text-secondary-light dark:text-text-secondary-dark">
+                          <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">系统设置</span> →
+                          <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">隐私与安全性</span> →
+                          <span class="font-mono bg-input-light dark:bg-input-dark px-2 py-1 rounded">屏幕录制</span>
+                        </p>
+                        <p class="text-text-secondary-light dark:text-text-secondary-dark">
+                          找到 <span class="font-semibold text-text-primary-light dark:text-text-primary-dark">Prompt Go</span>，勾选启用
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Troubleshooting -->
+                  <div class="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-lg p-4">
+                    <div class="flex items-start gap-3">
+                      <span class="material-symbols-outlined text-text-primary-light dark:text-text-primary-dark text-xl mt-0.5">lightbulb</span>
+                      <div class="flex-1">
+                        <h4 class="text-text-primary-light dark:text-text-primary-dark font-semibold text-sm mb-1">提示</h4>
+                        <p class="text-text-secondary-light dark:text-text-secondary-dark text-sm">
+                          如果权限设置后仍无法使用，请尝试：<br/>
+                          1. 完全退出 Prompt Go 后重新打开<br/>
+                          2. 在权限设置中移除 Prompt Go，然后重新添加<br/>
+                          3. 重启您的 Mac
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -119,13 +119,15 @@ test('settings renderer applies the neutral theme to dynamic content', async (t)
   assert.match(inactiveBadge.className, /bg-surface-light/);
   assert.doesNotMatch(`${providerBadge.className} ${inactiveBadge.className}`, /yellow|blue/);
 
-  page.getElementById('mac-permission-toggle').click();
-  assert.equal(page.getElementById('mac-permission-content').classList.contains('hidden'), false);
-
-  // About section: collapsed by default, expands on click
+  // About & Help section (merged): collapsed by default, expands on click
+  assert.equal(page.getElementById('mac-permission-toggle'), null);
   assert.equal(page.getElementById('about-content').classList.contains('hidden'), true);
   page.getElementById('about-toggle').click();
   assert.equal(page.getElementById('about-content').classList.contains('hidden'), false);
+
+  // Mac permission guide is nested inside the merged section
+  const headings = [...page.querySelectorAll('#about-content h3')].map(h => h.textContent.trim());
+  assert.ok(headings.some(t => t.includes('Mac 权限设置指南')));
 
   page.getElementById('add-provider-btn').click();
   assert.equal(page.getElementById('provider-modal').classList.contains('hidden'), false);
