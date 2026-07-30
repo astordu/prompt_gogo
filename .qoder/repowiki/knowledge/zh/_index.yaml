@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-30T07:02:04Z"
+exported_at: "2026-07-30T08:05:18Z"
 modules:
     "":
-        dir_name: Prompt Go 项目根编排（Electron AI 快捷键助手）
-        title: Prompt Go 项目根编排（Electron AI 快捷键助手）
+        dir_name: Prompt Go 项目根编排层
+        title: Prompt Go 项目根编排层
         scope:
             - README.md
             - CONTEXT.md
@@ -75,8 +75,8 @@ modules:
             - path: electron_app/renderer_ui
             - path: tests
     scripts:
-        dir_name: Ralph 自动化 Agent 运行脚本集
-        title: Ralph 自动化 Agent 运行脚本集
+        dir_name: Ralph AI Agent 自动化运行脚本
+        title: Ralph AI Agent 自动化运行脚本
         scope:
             - ralph/
         source_files: []

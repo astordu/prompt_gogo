@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: scripts
-title: Ralph 自动化 Agent 运行脚本集
+title: Ralph AI Agent 自动化运行脚本
 scope:
     - ralph/
 source_files: []
