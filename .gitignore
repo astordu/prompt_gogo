@@ -9,3 +9,4 @@ build/*
 .idea/
 config.json
 coverage/
+.bh-run/

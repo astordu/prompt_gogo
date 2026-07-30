@@ -12,4 +12,12 @@ disable-model-invocation: true
 
 完成后，使用 /code-review 来审查这项工作。
 
+如果发现 blocking 问题：
+   - 修改代码；
+   - 增加或修改能够复现问题的测试；
+   - 重新暂存；
+   - 重新运行验证；
+   - 重新运行 /code-review。
+重复以上过程，直到不存在 blocking 问题。
+
 将你的工作提交到当前分支。
