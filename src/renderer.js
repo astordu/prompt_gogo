@@ -970,8 +970,9 @@ async function deleteProvider(id) {
 /**
  * Scroll to and flash every Shortcut row that blocks a Provider deletion,
  * so the user knows exactly which entries to resolve first. The flash is a
- * self-stopping neutral-palette animation (see `.shortcut-row-flash` in
- * settings.html); it cleans itself up on `animationend`.
+ * self-stopping neutral-palette frame (a pulsing outline whose middle stays
+ * transparent — see `.shortcut-row-flash` in settings.html); it cleans itself
+ * up on `animationend`.
  */
 function highlightBlockingShortcuts(shortcutIds) {
   const rows = shortcutIds

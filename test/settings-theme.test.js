@@ -24,6 +24,16 @@ test('settings theme uses only neutral color tokens and utilities', () => {
   assert.doesNotMatch(settings, /[\u{1F300}-\u{1FAFF}]/u);
   assert.doesNotMatch(settings, /shadow-2xl/);
   assert.match(settings, /"-apple-system", "BlinkMacSystemFont", "Segoe UI"/);
+
+  // #47 — the blocked-deletion highlight is a transparent-middle frame
+  // (outline), never a solid background block (user feedback on the first
+  // pass said the full-black background was too heavy).
+  const flashBlock = settings.slice(
+    settings.indexOf('.shortcut-row-flash'),
+    settings.indexOf('</style>', settings.indexOf('.shortcut-row-flash')),
+  );
+  assert.match(flashBlock, /outline\s*:/, 'flash uses a frame (outline)');
+  assert.doesNotMatch(flashBlock, /background-color\s*:/, 'flash has no background fill');
 });
 
 test('settings renderer applies the neutral theme to dynamic content', async (t) => {

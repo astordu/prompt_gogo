@@ -120,22 +120,25 @@
       --tw-ring-color: rgba(240, 246, 252, 0.2) !important;
     }
     /* Highlight dependent rows when a Provider deletion is blocked (#47).
-       Neutral palette only — the row background pulses briefly. The finite
-       iteration count stops it automatically; renderer.js also removes the
-       class on animationend so it can be re-triggered. */
+       Neutral palette only — a frame (outline) pulses around the row while
+       the middle stays transparent, so the highlight reads as a light outline
+       instead of a heavy solid block (per user feedback). Outline never
+       affects layout. The finite iteration count stops it automatically;
+       renderer.js also removes the class on animationend so it can be
+       re-triggered. */
     .shortcut-row-flash {
       animation: shortcut-row-flash 0.7s ease-in-out 3;
     }
     @keyframes shortcut-row-flash {
-      0%, 100% { background-color: transparent; }
-      50% { background-color: #1f2328; }
+      0%, 100% { outline: 2px solid transparent; outline-offset: -2px; }
+      50% { outline: 2px solid #1f2328; outline-offset: -2px; }
     }
     .dark .shortcut-row-flash {
       animation-name: shortcut-row-flash-dark;
     }
     @keyframes shortcut-row-flash-dark {
-      0%, 100% { background-color: transparent; }
-      50% { background-color: #f0f6fc; }
+      0%, 100% { outline: 2px solid transparent; outline-offset: -2px; }
+      50% { outline: 2px solid #f0f6fc; outline-offset: -2px; }
     }
   </style>
 </head>
