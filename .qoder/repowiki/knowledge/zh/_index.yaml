@@ -3,7 +3,7 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-30T08:05:18Z"
+exported_at: "2026-07-30T08:34:48Z"
 modules:
     "":
         dir_name: Prompt Go 项目根编排层
@@ -40,8 +40,8 @@ modules:
         related_to:
             - path: scripts
     electron_app:
-        dir_name: Electron 快捷键 AI 助手应用
-        title: Electron 快捷键 AI 助手应用
+        dir_name: Electron AI 快捷键流式输出桌面应用
+        title: Electron AI 快捷键流式输出桌面应用
         scope:
             - src/
         source_files: []

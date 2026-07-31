@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: electron_app
-title: Electron 快捷键 AI 助手应用
+title: Electron AI 快捷键流式输出桌面应用
 scope:
     - src/
 source_files: []
