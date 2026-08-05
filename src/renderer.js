@@ -776,6 +776,8 @@ const providerTypeSelect = document.getElementById('provider-type');
 const providerApikeyField = document.getElementById('provider-apikey-field');
 const providerApikeyInput = document.getElementById('provider-apikey');
 const providerApikeyHint = document.getElementById('provider-apikey-hint');
+const toggleApikeyVisibilityBtn = document.getElementById('toggle-apikey-visibility');
+const apikeyVisibilityIcon = document.getElementById('apikey-visibility-icon');
 const providerBaseurlField = document.getElementById('provider-baseurl-field');
 const providerBaseurlInput = document.getElementById('provider-baseurl');
 const providerModelSelect = document.getElementById('provider-model-select');
@@ -908,6 +910,9 @@ providerBaseurlInput.addEventListener('change', () => {
 
 function openProviderModal() {
   verifyProviderStatus.classList.add('hidden');
+  // Reset API Key visibility state (#49)
+  providerApikeyInput.type = 'password';
+  apikeyVisibilityIcon.textContent = 'visibility';
   providerModal.classList.remove('hidden');
 }
 
@@ -1002,6 +1007,13 @@ cancelProviderModalBtn.addEventListener('click', closeProviderModal);
 
 providerModal.addEventListener('click', (e) => {
   if (e.target === providerModal) closeProviderModal();
+});
+
+// #49 — Toggle API Key visibility in the Provider modal
+toggleApikeyVisibilityBtn.addEventListener('click', () => {
+  const isHidden = providerApikeyInput.type === 'password';
+  providerApikeyInput.type = isHidden ? 'text' : 'password';
+  apikeyVisibilityIcon.textContent = isHidden ? 'visibility_off' : 'visibility';
 });
 
 verifyProviderBtn.addEventListener('click', async () => {
