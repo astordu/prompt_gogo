@@ -898,6 +898,9 @@ function updateProviderFormFields(type, currentModel) {
 }
 
 providerTypeSelect.addEventListener('change', () => {
+  // Reset API Key to masked on type switch (#50)
+  providerApikeyInput.type = 'password';
+  apikeyVisibilityIcon.textContent = 'visibility_off';
   updateProviderFormFields(providerTypeSelect.value);
   verifyProviderStatus.classList.add('hidden');
 });
@@ -910,9 +913,9 @@ providerBaseurlInput.addEventListener('change', () => {
 
 function openProviderModal() {
   verifyProviderStatus.classList.add('hidden');
-  // Reset API Key visibility state (#49)
+  // Reset API Key visibility state (#49, #50)
   providerApikeyInput.type = 'password';
-  apikeyVisibilityIcon.textContent = 'visibility';
+  apikeyVisibilityIcon.textContent = 'visibility_off';
   providerModal.classList.remove('hidden');
 }
 
@@ -1013,7 +1016,7 @@ providerModal.addEventListener('click', (e) => {
 toggleApikeyVisibilityBtn.addEventListener('click', () => {
   const isHidden = providerApikeyInput.type === 'password';
   providerApikeyInput.type = isHidden ? 'text' : 'password';
-  apikeyVisibilityIcon.textContent = isHidden ? 'visibility_off' : 'visibility';
+  apikeyVisibilityIcon.textContent = isHidden ? 'visibility' : 'visibility_off';
 });
 
 verifyProviderBtn.addEventListener('click', async () => {
