@@ -434,7 +434,12 @@
         </div>
         <div id="provider-apikey-field">
           <label class="block text-sm font-medium text-text-primary-light dark:text-text-primary-dark pb-2" for="provider-apikey">API Key</label>
-          <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4" id="provider-apikey" placeholder="sk-..." type="password"/>
+          <div class="relative">
+            <input class="form-input w-full rounded-lg border border-border-light dark:border-border-dark bg-input-light dark:bg-input-dark focus:border-primary focus:ring-primary/50 text-text-primary-light dark:text-text-primary-dark h-11 px-4 pr-10" id="provider-apikey" placeholder="sk-..." type="password"/>
+            <button id="toggle-apikey-visibility" type="button" class="absolute inset-y-0 right-0 flex items-center pr-3 text-text-secondary-light dark:text-text-secondary-dark hover:text-text-primary-light dark:hover:text-text-primary-dark" aria-label="切换 API Key 可见性">
+              <span id="apikey-visibility-icon" class="material-symbols-outlined text-base">visibility_off</span>
+            </button>
+          </div>
           <p id="provider-apikey-hint" class="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-1 hidden">API Key 可选</p>
         </div>
         <div id="provider-baseurl-field" class="hidden">

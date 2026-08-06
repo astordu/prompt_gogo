@@ -20,6 +20,7 @@ interface HTMLElement {
   disabled: boolean;
   placeholder: string;
   value: any;
+  type: string;
 }
 
 interface Element {

@@ -270,3 +270,203 @@ test('blocking Provider deletion flashes the dependent shortcut rows (#47)', asy
   assert.equal(calls.deletedProviders.length, 0, 'Provider is not deleted while blocked');
   assert.ok(page.querySelector('.provider-delete-btn[data-id="provider-A"]'), 'Provider row remains');
 });
+
+// #49 — API Key visibility toggle (eye icon) in the Provider modal.
+// The button sits inside the input, toggles type between password/text,
+// and the icon swaps between visibility / visibility_off.
+test('API Key eye button toggles visibility and icon (#49)', async (t) => {
+  const settings = fs.readFileSync(settingsPath, 'utf8');
+  const dom = new JSDOM(settings, { url: 'http://localhost/settings.html' });
+  const page = dom.window.document;
+  const injectedGlobalKeys = [
+    'window', 'document', 'Event', 'KeyboardEvent', 'Node', 'HTMLElement',
+    'getComputedStyle', 'confirm', 'alert', 'providerModule', 'templateModule', 'shortcutDraftModule',
+  ];
+  const originalGlobals = new Map(
+    injectedGlobalKeys.map(key => [key, Object.getOwnPropertyDescriptor(global, key)]),
+  );
+
+  Object.assign(global, {
+    window: dom.window,
+    document: dom.window.document,
+    Event: dom.window.Event,
+    KeyboardEvent: dom.window.KeyboardEvent,
+    Node: dom.window.Node,
+    HTMLElement: dom.window.HTMLElement,
+    getComputedStyle: dom.window.getComputedStyle,
+    confirm: () => true,
+    alert: () => {},
+    providerModule: require('../src/provider'),
+    templateModule: require('../src/template'),
+    shortcutDraftModule: require('../src/shortcut-draft'),
+  });
+  Object.assign(dom.window, {
+    confirm: global.confirm,
+    alert: global.alert,
+    electronAPI: {
+      getConfig: async () => ({ providers: [], shortcuts: [] }),
+      saveProvider: async () => {},
+      deleteProvider: async () => {},
+      validateProvider: async () => ({ success: true }),
+      saveShortcut: async () => ({ success: true }),
+      deleteShortcut: async () => {},
+      checkShortcutAvailability: async () => ({ status: 'available' }),
+      recommendShortcut: async () => null,
+      recheckShortcut: async () => ({ recovered: true }),
+    },
+  });
+
+  const rendererPathLocal = require.resolve('../src/renderer');
+  t.after(() => {
+    delete require.cache[rendererPathLocal];
+    dom.window.close();
+    for (const key of injectedGlobalKeys) {
+      const descriptor = originalGlobals.get(key);
+      if (descriptor) {
+        Object.defineProperty(global, key, descriptor);
+      } else {
+        delete global[key];
+      }
+    }
+  });
+
+  delete require.cache[rendererPathLocal];
+  require(rendererPathLocal);
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Open the provider modal
+  page.getElementById('add-provider-btn').click();
+  const apikeyInput = page.getElementById('provider-apikey');
+  const toggleBtn = page.getElementById('toggle-apikey-visibility');
+  const toggleIcon = page.getElementById('apikey-visibility-icon');
+
+  assert.ok(toggleBtn, 'eye toggle button exists');
+  assert.equal(apikeyInput.type, 'password', 'initial type is password');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 'initial icon is visibility_off');
+
+  // First click: show the key
+  toggleBtn.click();
+  assert.equal(apikeyInput.type, 'text', 'type switches to text after click');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility', 'icon switches to visibility');
+
+  // Second click: hide the key again
+  toggleBtn.click();
+  assert.equal(apikeyInput.type, 'password', 'type switches back to password');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 'icon switches back to visibility_off');
+
+  // State resets when modal is closed and reopened
+  toggleBtn.click(); // make it visible
+  assert.equal(apikeyInput.type, 'text');
+  page.getElementById('cancel-provider-modal').click();
+  page.getElementById('add-provider-btn').click();
+  assert.equal(apikeyInput.type, 'password', 'type resets to password on reopen');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 'icon resets to visibility_off on reopen');
+});
+
+// #50 — API Key visibility state resets to masked on every modal open and
+// on provider type switch. The eye icon must always be visibility_off when
+// the input is password-masked.
+test('API Key eye state resets on modal open and provider type switch (#50)', async (t) => {
+  const settings = fs.readFileSync(settingsPath, 'utf8');
+  const dom = new JSDOM(settings, { url: 'http://localhost/settings.html' });
+  const page = dom.window.document;
+
+  const existingProvider = {
+    id: 'p-existing', name: 'My DeepSeek', type: 'deepseek',
+    apiKey: 'sk-secret', model: 'deepseek-v4-flash',
+  };
+
+  const injectedGlobalKeys = [
+    'window', 'document', 'Event', 'KeyboardEvent', 'Node', 'HTMLElement',
+    'getComputedStyle', 'confirm', 'alert', 'providerModule', 'templateModule', 'shortcutDraftModule',
+  ];
+  const originalGlobals = new Map(
+    injectedGlobalKeys.map(key => [key, Object.getOwnPropertyDescriptor(global, key)]),
+  );
+
+  Object.assign(global, {
+    window: dom.window,
+    document: dom.window.document,
+    Event: dom.window.Event,
+    KeyboardEvent: dom.window.KeyboardEvent,
+    Node: dom.window.Node,
+    HTMLElement: dom.window.HTMLElement,
+    getComputedStyle: dom.window.getComputedStyle,
+    confirm: () => true,
+    alert: () => {},
+    providerModule: require('../src/provider'),
+    templateModule: require('../src/template'),
+    shortcutDraftModule: require('../src/shortcut-draft'),
+  });
+  Object.assign(dom.window, {
+    confirm: global.confirm,
+    alert: global.alert,
+    electronAPI: {
+      getConfig: async () => ({ providers: [existingProvider], shortcuts: [] }),
+      saveProvider: async () => {},
+      deleteProvider: async () => {},
+      validateProvider: async () => ({ success: true }),
+      saveShortcut: async () => ({ success: true }),
+      deleteShortcut: async () => {},
+      checkShortcutAvailability: async () => ({ status: 'available' }),
+      recommendShortcut: async () => null,
+      recheckShortcut: async () => ({ recovered: true }),
+    },
+  });
+
+  const rendererPathLocal = require.resolve('../src/renderer');
+  t.after(() => {
+    delete require.cache[rendererPathLocal];
+    dom.window.close();
+    for (const key of injectedGlobalKeys) {
+      const descriptor = originalGlobals.get(key);
+      if (descriptor) {
+        Object.defineProperty(global, key, descriptor);
+      } else {
+        delete global[key];
+      }
+    }
+  });
+
+  delete require.cache[rendererPathLocal];
+  require(rendererPathLocal);
+  await new Promise(resolve => setImmediate(resolve));
+
+  const apikeyInput = page.getElementById('provider-apikey');
+  const toggleIcon = page.getElementById('apikey-visibility-icon');
+  const toggleBtn = page.getElementById('toggle-apikey-visibility');
+
+  // --- Edit existing provider: must open masked ---
+  page.querySelector('.provider-edit-btn').click();
+  assert.equal(apikeyInput.type, 'password', 'edit modal opens with password type');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 'edit modal opens with visibility_off icon');
+
+  // Unmask, then close and reopen — must be masked again
+  toggleBtn.click();
+  assert.equal(apikeyInput.type, 'text', 'unmasked for editing');
+  page.getElementById('cancel-provider-modal').click();
+  page.querySelector('.provider-edit-btn').click();
+  assert.equal(apikeyInput.type, 'password', 're-edit resets to password');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 're-edit resets icon to visibility_off');
+
+  // --- Provider type switch resets to masked ---
+  // Open add modal, unmask, then switch type
+  page.getElementById('cancel-provider-modal').click();
+  page.getElementById('add-provider-btn').click();
+  toggleBtn.click(); // unmask
+  assert.equal(apikeyInput.type, 'text', 'unmasked before type switch');
+
+  const typeSelect = page.getElementById('provider-type');
+  typeSelect.value = 'ollama';
+  typeSelect.dispatchEvent(new dom.window.Event('change'));
+  // After switching type, API Key field should be masked again
+  // (even though the field is hidden for ollama, the state resets)
+  assert.equal(apikeyInput.type, 'password', 'type switch resets to password');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 'type switch resets icon to visibility_off');
+
+  // Switch back to deepseek — still masked
+  typeSelect.value = 'deepseek';
+  typeSelect.dispatchEvent(new dom.window.Event('change'));
+  assert.equal(apikeyInput.type, 'password', 'switch back keeps password');
+  assert.equal(toggleIcon.textContent.trim(), 'visibility_off', 'switch back keeps visibility_off');
+});
