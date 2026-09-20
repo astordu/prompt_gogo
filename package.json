@@ -54,5 +54,8 @@
     "directories": {
       "output": "dist"
     }
+  },
+  "allowScripts": {
+    "electron@28.3.3": true
   }
 }
